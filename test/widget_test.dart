@@ -1,9 +1,7 @@
-// This is a basic Flutter widget test.
+// Test básico para el Sistema de Inventarios Telmex
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// Este test verifica que la aplicación se inicie correctamente
+// y que la pantalla de login se muestre.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,20 +9,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:proyecto_telmex/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  testWidgets('Sistema Telmex - Pantalla de Login', (WidgetTester tester) async {
+    // Construir la aplicación y activar un frame
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Verificar que la pantalla de login se muestre
+    expect(find.text('Sistema Telmex'), findsOneWidget);
+    expect(find.text('Nombre de Usuario'), findsOneWidget);
+    expect(find.text('Contraseña'), findsOneWidget);
+    expect(find.text('Iniciar Sesión'), findsOneWidget);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  testWidgets('Sistema Telmex - Campos de entrada', (WidgetTester tester) async {
+    // Construir la aplicación
+    await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verificar que los campos de entrada estén presentes
+    expect(find.byType(TextFormField), findsNWidgets(2));
+    expect(find.byType(ElevatedButton), findsOneWidget);
   });
 }

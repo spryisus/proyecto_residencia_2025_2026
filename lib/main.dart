@@ -572,6 +572,17 @@ class AdminDashboard extends StatelessWidget {
                 );
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.assessment_outlined),
+              title: const Text('Reportes'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ReportesPage()),
+                );
+              },
+            ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout),
@@ -626,5 +637,227 @@ class ActividadUsuariosPage extends StatelessWidget {
         child: Text('Métricas/actividad de usuarios (pendiente)'),
       ),
     );
+  }
+}
+
+class ReportesPage extends StatelessWidget {
+  const ReportesPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Reportes'),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF003366),
+        foregroundColor: Colors.white,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Módulo de Reportes',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF003366),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: GridView.count(
+                crossAxisCount: 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                children: [
+                  _buildReportCard(
+                    context,
+                    icon: Icons.inventory_2_outlined,
+                    title: 'Reporte de Inventarios',
+                    subtitle: 'Estado actual del inventario',
+                    color: Colors.blue,
+                    onTap: () => _showReportDialog(context, 'Inventarios'),
+                  ),
+                  _buildReportCard(
+                    context,
+                    icon: Icons.local_shipping_outlined,
+                    title: 'Reporte de Envíos',
+                    subtitle: 'Seguimiento de envíos',
+                    color: Colors.green,
+                    onTap: () => _showReportDialog(context, 'Envíos'),
+                  ),
+                  _buildReportCard(
+                    context,
+                    icon: Icons.people_outline,
+                    title: 'Reporte de Usuarios',
+                    subtitle: 'Actividad de usuarios',
+                    color: Colors.orange,
+                    onTap: () => _showReportDialog(context, 'Usuarios'),
+                  ),
+                  _buildReportCard(
+                    context,
+                    icon: Icons.trending_up_outlined,
+                    title: 'Reporte de Estadísticas',
+                    subtitle: 'Métricas generales',
+                    color: Colors.purple,
+                    onTap: () => _showReportDialog(context, 'Estadísticas'),
+                  ),
+                  _buildReportCard(
+                    context,
+                    icon: Icons.file_download_outlined,
+                    title: 'Exportar Datos',
+                    subtitle: 'Exportar a Excel/PDF',
+                    color: Colors.red,
+                    onTap: () => _showReportDialog(context, 'Exportar'),
+                  ),
+                  _buildReportCard(
+                    context,
+                    icon: Icons.schedule_outlined,
+                    title: 'Reportes Programados',
+                    subtitle: 'Configurar reportes automáticos',
+                    color: Colors.teal,
+                    onTap: () => _showReportDialog(context, 'Programados'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportCard(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  icon,
+                  size: 32,
+                  color: color,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF003366),
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showReportDialog(BuildContext context, String reportType) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Reporte de $reportType'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('¿Qué tipo de reporte deseas generar?'),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _generateReport(context, reportType, 'Vista Previa');
+                },
+                icon: const Icon(Icons.visibility),
+                label: const Text('Vista Previa'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF003366),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _generateReport(context, reportType, 'PDF');
+                },
+                icon: const Icon(Icons.picture_as_pdf),
+                label: const Text('Exportar PDF'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _generateReport(context, reportType, 'Excel');
+                },
+                icon: const Icon(Icons.table_chart),
+                label: const Text('Exportar Excel'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _generateReport(BuildContext context, String reportType, String format) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Generando reporte de $reportType en formato $format...'),
+        backgroundColor: const Color(0xFF003366),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+    
+    // Aquí iría la lógica real para generar el reporte
+    // Por ahora solo mostramos un mensaje
   }
 }
