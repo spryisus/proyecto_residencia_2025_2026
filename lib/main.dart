@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-// import 'app/config/supabase_client.dart';
+import 'app/config/supabase_client.dart';
 import 'base_conexion/conexion_db.dart';
 
-// Nota: el arranque por plataforma está en lib/entrypoints/
+// Arranque por defecto (útil si ejecutas `flutter run` sin --target)
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppSupabaseConfig.initialize();
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -132,8 +137,9 @@ class _MyHomePageState extends State<MyHomePage> {
       final user = await supabase
           .from('t_empleados_ld')
           .select()
-          .eq('username', _usernameController.text.trim())
-          .eq('contraseña', _passwordController.text)
+          .eq('nombre_usuario', _usernameController.text.trim())
+          .eq('contrasena', _passwordController.text)
+          .inFilter('rol', ['admin', 'normal'])
           .maybeSingle();
 
       if (user == null) {
@@ -141,7 +147,7 @@ class _MyHomePageState extends State<MyHomePage> {
       }
 
       if (!mounted) return;
-      // Notificación breve y navegación a pantalla de bienvenida
+      // Notificación breve y navegación según rol
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('✅ Sesión iniciada correctamente'),
@@ -151,18 +157,28 @@ class _MyHomePageState extends State<MyHomePage> {
       );
       await Future.delayed(const Duration(milliseconds: 300));
       if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const WelcomePage(),
-        ),
-      );
+      final String rol = (user['rol']?.toString().toLowerCase() ?? 'usuario');
+      if (rol == 'admin') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AdminDashboard(username: _usernameController.text.trim()),
+          ),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => WelcomePage(username: _usernameController.text.trim()),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('❌ Error al iniciar sesión: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: const Color.fromRGBO(244, 67, 54, 1),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -232,7 +248,7 @@ class _MyHomePageState extends State<MyHomePage> {
                       controller: _usernameController,
                       keyboardType: TextInputType.text,
                       decoration: const InputDecoration(
-                        labelText: 'Usuario (username)',
+                        labelText: 'Nombre de Usuario',
                         prefixIcon: Icon(Icons.person_outline),
                         border: OutlineInputBorder(),
                       ),
@@ -298,7 +314,8 @@ class _MyHomePageState extends State<MyHomePage> {
 }
 
 class WelcomePage extends StatelessWidget {
-  const WelcomePage({super.key});
+  final String? username;
+  const WelcomePage({super.key, this.username});
 
   @override
   Widget build(BuildContext context) {
@@ -328,6 +345,77 @@ class WelcomePage extends StatelessWidget {
             tooltip: 'Probar conexión',
           ),
         ],
+      ),
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            DrawerHeader(
+              decoration: const BoxDecoration(color: Color(0xFF003366)),
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Menú',
+                      style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    if (username != null && username!.isNotEmpty)
+                      Row(
+                        children: [
+                          const Icon(Icons.person, color: Colors.white70, size: 18),
+                          const SizedBox(width: 6),
+                          Text(
+                            username!,
+                            style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.inventory_2_outlined),
+              title: const Text('Inventarios'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const InventariosPage()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.local_shipping_outlined),
+              title: const Text('Envíos'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const EnviosPage()),
+                );
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('Ajustes'),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Ajustes (próximamente)'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
       ),
       body: Center(
         child: Column(
@@ -366,6 +454,176 @@ class WelcomePage extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class InventariosPage extends StatelessWidget {
+  const InventariosPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Inventarios'),
+        centerTitle: true,
+      ),
+      body: const Center(
+        child: Text(
+          'Bienvenido a Inventarios',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF003366),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class EnviosPage extends StatelessWidget {
+  const EnviosPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Envíos'),
+        centerTitle: true,
+      ),
+      body: const Center(
+        child: Text(
+          'Bienvenido a Envíos',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF003366),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AdminDashboard extends StatelessWidget {
+  final String? username;
+  const AdminDashboard({super.key, this.username});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Panel de Administración'),
+        centerTitle: true,
+      ),
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            DrawerHeader(
+              decoration: const BoxDecoration(color: Color(0xFF003366)),
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Admin',
+                      style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    if (username != null && username!.isNotEmpty)
+                      Row(
+                        children: [
+                          const Icon(Icons.person, color: Colors.white70, size: 18),
+                          const SizedBox(width: 6),
+            Text(
+                            username!,
+                            style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.group_add_outlined),
+              title: const Text('Crear usuarios'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CrearUsuariosPage()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.analytics_outlined),
+              title: const Text('Actividad de usuarios'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ActividadUsuariosPage()),
+                );
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.logout),
+              title: const Text('Cerrar sesión'),
+              onTap: () {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const MyHomePage(title: 'Sistema de Inventarios Telmex')),
+                  (route) => false,
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+      body: const Center(
+        child: Text(
+          'Dashboard de Administrador',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF003366),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class CrearUsuariosPage extends StatelessWidget {
+  const CrearUsuariosPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Crear usuarios')),
+      body: const Center(
+        child: Text('Pantalla para crear usuarios (pendiente)'),
+      ),
+    );
+  }
+}
+
+class ActividadUsuariosPage extends StatelessWidget {
+  const ActividadUsuariosPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Actividad de usuarios')),
+      body: const Center(
+        child: Text('Métricas/actividad de usuarios (pendiente)'),
       ),
     );
   }
