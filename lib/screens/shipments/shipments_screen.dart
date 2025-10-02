@@ -39,33 +39,64 @@ class ShipmentsScreen extends StatelessWidget {
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  int crossAxisCount = 2;
-                  if (constraints.maxWidth < 600) crossAxisCount = 1;
-                  
-                  return GridView.count(
-                    crossAxisCount: crossAxisCount,
-                    crossAxisSpacing: 20,
-                    mainAxisSpacing: 20,
-                    childAspectRatio: 1.2,
-                    children: [
-                      _buildEnvioOptionCard(
-                        context,
-                        icon: Icons.local_shipping,
-                        title: 'Rastrear Envío',
-                        subtitle: 'Consulta el estado de tus envíos',
-                        color: Colors.blue,
-                        onTap: () => _navigateToTrackShipment(context),
-                      ),
-                      _buildEnvioOptionCard(
-                        context,
-                        icon: Icons.assessment,
-                        title: 'Reportes de Envíos',
-                        subtitle: 'Genera reportes y estadísticas',
-                        color: Colors.green,
-                        onTap: () => _navigateToShipmentReports(context),
-                      ),
-                    ],
-                  );
+                  if (constraints.maxWidth < 600) {
+                    // Una columna en pantallas pequeñas
+                    return Column(
+                      children: [
+                        Expanded(
+                          child: _buildEnvioOptionCard(
+                            context,
+                            icon: Icons.local_shipping,
+                            title: 'Rastrear Envío',
+                            subtitle: 'Consulta el estado de tus envíos',
+                            color: Colors.blue,
+                            onTap: () => _navigateToTrackShipment(context),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Expanded(
+                          child: _buildEnvioOptionCard(
+                            context,
+                            icon: Icons.assessment,
+                            title: 'Reportes de Envíos',
+                            subtitle: 'Genera reportes y estadísticas',
+                            color: Colors.green,
+                            onTap: () => _navigateToShipmentReports(context),
+                          ),
+                        ),
+                      ],
+                    );
+                  } else {
+                    // Dos columnas centradas en pantallas medianas y grandes
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          flex: 1,
+                          child: _buildEnvioOptionCard(
+                            context,
+                            icon: Icons.local_shipping,
+                            title: 'Rastrear Envío',
+                            subtitle: 'Consulta el estado de tus envíos',
+                            color: Colors.blue,
+                            onTap: () => _navigateToTrackShipment(context),
+                          ),
+                        ),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          flex: 1,
+                          child: _buildEnvioOptionCard(
+                            context,
+                            icon: Icons.assessment,
+                            title: 'Reportes de Envíos',
+                            subtitle: 'Genera reportes y estadísticas',
+                            color: Colors.green,
+                            onTap: () => _navigateToShipmentReports(context),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
                 },
               ),
             ),

@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app/config/supabase_client.dart';
 import 'screens/auth/login_screen.dart';
 
-// Arranque por defecto (útil si ejecutas `flutter run` sin --target)
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppSupabaseConfig.initialize();
@@ -16,7 +16,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Sistema Telmex',
+      title: 'Sistema de Larga Distancia',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF003366), // Azul corporativo Telmex

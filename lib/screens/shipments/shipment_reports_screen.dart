@@ -37,7 +37,7 @@ class ShipmentReportsScreen extends StatelessWidget {
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  int crossAxisCount = 2;
+                  int crossAxisCount = 3;
                   if (constraints.maxWidth < 800) crossAxisCount = 2;
                   if (constraints.maxWidth < 600) crossAxisCount = 1;
                   
@@ -45,7 +45,7 @@ class ShipmentReportsScreen extends StatelessWidget {
                     crossAxisCount: crossAxisCount,
                     crossAxisSpacing: 20,
                     mainAxisSpacing: 20,
-                    childAspectRatio: 1.2,
+                    childAspectRatio: 1.1,
                     children: [
                       _buildReportCard(
                         context,
