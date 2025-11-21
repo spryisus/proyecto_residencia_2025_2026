@@ -1,1 +1,6 @@
 CREEME WEY
+
+--comando para iniciar mi servidor en segundo plano
+
+cd /home/spryisus/Flutter/Proyecto_Telmex/dhl_tracking_proxy
+nohup npm start > /tmp/dhl_proxy.log 2>&1 &

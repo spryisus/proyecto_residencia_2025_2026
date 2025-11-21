@@ -43,3 +43,38 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Node.js / DHL Proxy
+node_modules/
+npm-debug.log
+yarn-error.log
+.env
+.env.local
+*.log
+
+# DHL Tracking Proxy
+dhl_tracking_proxy/node_modules/
+dhl_tracking_proxy/.env
+dhl_tracking_proxy/*.log
+
+# Archivos temporales y de desarrollo
+*.jpeg
+*.jpg
+*.png
+!icon.png
+!assets/**/*.png
+!assets/**/*.jpg
+!assets/**/*.jpeg
+README_INSTALADOR_LINUX.md
+READMY.txt
+error.jpeg
+
+# Scripts de compilación local (opcional, puedes incluirlos si quieres)
+# build_executables.sh
+# compilar_*.sh
+# crear_*.sh
+# instalar_*.sh
+
+# Archivos de configuración local
+android/local.properties
+*.local

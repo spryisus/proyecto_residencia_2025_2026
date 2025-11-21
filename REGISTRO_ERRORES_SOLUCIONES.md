@@ -314,8 +314,136 @@ ERROR: Server connection failed
 
 ---
 
-**Última Actualización:** 30 de Septiembre, 2025 - 00:25  
-**Total de Errores Resueltos:** 10  
+---
+
+### **Error #011: Falta permiso INTERNET en AndroidManifest principal**
+**Fecha:** Noviembre 2025  
+**Descripción:** Error al ejecutar la aplicación en dispositivo Android móvil debido a falta del permiso INTERNET en el AndroidManifest principal
+
+**Problema Original:**
+- La aplicación necesita conectarse a Supabase para funcionar
+- El permiso INTERNET solo estaba en `debug/AndroidManifest.xml` y `profile/AndroidManifest.xml`
+- El permiso no estaba en `main/AndroidManifest.xml`, que es el que se usa en dispositivos reales
+- Sin este permiso, la aplicación no puede realizar conexiones de red
+
+**Causa Raíz:**
+- Android requiere declarar explícitamente los permisos en el AndroidManifest
+- Los permisos de `debug` y `profile` solo aplican durante desarrollo, no en producción
+- El AndroidManifest principal (`main/AndroidManifest.xml`) es el que se usa en dispositivos reales
+
+**Solución Aplicada:**
+1. Agregado permiso `INTERNET` al AndroidManifest principal
+2. Agregado permiso `ACCESS_NETWORK_STATE` para verificar estado de red
+3. Agregados permisos de ubicación (`ACCESS_FINE_LOCATION` y `ACCESS_COARSE_LOCATION`) para geolocator
+4. Mantenidos permisos de cámara ya existentes
+
+**Archivos Modificados:**
+- `/android/app/src/main/AndroidManifest.xml`: Agregados permisos de red y ubicación
+
+**Permisos Agregados:**
+- `android.permission.INTERNET` - Para conexiones de red (Supabase)
+- `android.permission.ACCESS_NETWORK_STATE` - Para verificar estado de conexión
+- `android.permission.ACCESS_FINE_LOCATION` - Para ubicación precisa (geolocator)
+- `android.permission.ACCESS_COARSE_LOCATION` - Para ubicación aproximada (geolocator)
+
+**Estado:** ✅ RESUELTO - Permisos agregados correctamente al AndroidManifest principal
+
+**Pasos para Aplicar la Solución:**
+1. Recompilar la aplicación con `flutter clean && flutter build apk` o `flutter run`
+2. Reinstalar la aplicación en el dispositivo móvil
+3. Verificar que la aplicación puede conectarse a Supabase
+
+---
+
+### **Error #012: Servidor proxy DHL no accesible desde dispositivo móvil**
+**Fecha:** Noviembre 2025  
+**Descripción:** Error "Connection refused" al intentar rastrear envíos DHL desde la aplicación móvil
+
+**Error Original:**
+```
+ClientException with SocketConnection refused
+(OS Error: Connection refused, errno = 111)
+address = 192.168.1.178, port = 39822
+uri=http://192.168.1.178:3000/api/track/6376423056
+```
+
+**Causa Raíz:**
+- El servidor proxy DHL no estaba corriendo
+- El servidor estaba configurado para escuchar solo en `localhost` (127.0.0.1), no en todas las interfaces
+- El servidor necesita escuchar en `0.0.0.0` para ser accesible desde dispositivos en la red local
+
+**Solución Aplicada:**
+1. Modificado `server.js` para que el servidor escuche en `0.0.0.0` (todas las interfaces) en lugar de solo `localhost`
+2. Agregado código para mostrar automáticamente la IP local en los logs del servidor
+3. Iniciado el servidor proxy DHL en segundo plano
+
+**Archivos Modificados:**
+- `/dhl_tracking_proxy/server.js`: Cambiado `app.listen(PORT, ...)` a `app.listen(PORT, '0.0.0.0', ...)`
+
+**Comandos para Iniciar el Servidor:**
+```bash
+cd dhl_tracking_proxy
+./start.sh
+# O directamente:
+npm start
+```
+
+**Verificación:**
+- Servidor accesible en: `http://192.168.1.178:3000`
+- Health check: `http://192.168.1.178:3000/health`
+- Endpoint: `http://192.168.1.178:3000/api/track/:trackingNumber`
+
+**Notas Importantes:**
+- El dispositivo móvil y la computadora deben estar en la misma red WiFi
+- El firewall no debe bloquear el puerto 3000
+- La IP puede cambiar si cambias de red, actualiza la IP en `track_shipment_screen.dart` si es necesario
+
+**Estado:** ✅ RESUELTO - Servidor proxy configurado y corriendo correctamente
+
+---
+
+---
+
+### **Error #013: Diferencia en visualización de datos de tracking entre móvil y escritorio**
+**Fecha:** Noviembre 2025  
+**Descripción:** La aplicación móvil mostraba "Estado: No encontrado" y descripciones con caracteres no deseados, mientras que la aplicación de escritorio mostraba los datos correctamente
+
+**Problema Original:**
+- La aplicación móvil mostraba estado "No encontrado" aunque había eventos de tracking
+- Las descripciones de los eventos tenían tabs, saltos de línea y espacios excesivos (`\n\t\t\t...`)
+- El estado no se determinaba automáticamente desde los eventos cuando el servidor devolvía "No encontrado"
+- La ubicación no se extraía correctamente de las descripciones
+- En móvil se cortaban demasiado los textos (solo 2 líneas)
+
+**Causa Raíz:**
+- El servidor proxy DHL devolvía `status: "No encontrado"` aunque había eventos válidos
+- Las descripciones venían con formato HTML/texto sin limpiar del scraping
+- No había lógica para determinar el estado desde los eventos cuando el servidor no lo proporcionaba correctamente
+- Falta de limpieza de caracteres especiales en las descripciones
+
+**Solución Aplicada:**
+1. **Mejora del parseo de estado:** Agregada lógica para determinar el estado automáticamente desde los eventos si el servidor devuelve "No encontrado" pero hay eventos
+2. **Limpieza de descripciones:** Implementada función `_cleanDescription()` que remueve tabs, saltos de línea y espacios excesivos
+3. **Extracción de ubicación:** Agregada función `_extractLocationFromDescription()` que extrae ubicación de formatos como "CIUDAD - ESTADO - PAÍS"
+4. **Mejora de visualización móvil:** Aumentado de 2 a 3 líneas el máximo de texto mostrado en móvil y cambiado `TextOverflow.ellipsis` a `TextOverflow.visible`
+
+**Archivos Modificados:**
+- `/lib/data/services/dhl_tracking_service.dart`: Mejorado método `_parseProxyResponse()` para determinar estado desde eventos
+- `/lib/data/models/tracking_event_model.dart`: Agregadas funciones de limpieza y extracción de datos
+- `/lib/widgets/tracking_timeline_widget.dart`: Mejorada visualización para móvil
+
+**Funcionalidades Agregadas:**
+- `_cleanDescription()`: Limpia descripciones removiendo caracteres especiales
+- `_extractLocationFromDescription()`: Extrae ubicación de descripciones
+- `_extractStatusFromDescription()`: Extrae estado de descripciones
+- Determinación automática de estado desde eventos
+
+**Estado:** ✅ RESUELTO - Datos se muestran correctamente tanto en móvil como en escritorio
+
+---
+
+**Última Actualización:** Noviembre 2025  
+**Total de Errores Resueltos:** 13  
 **Total de Funcionalidades Implementadas:** 1  
 **Estado General del Proyecto:** ✅ FUNCIONANDO CORRECTAMENTE
 

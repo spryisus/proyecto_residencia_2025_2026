@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'app/config/supabase_client.dart';
+import 'app/theme/app_theme.dart';
+import 'app/theme/theme_provider.dart';
 import 'screens/auth/login_screen.dart';
+import 'core/di/injection_container.dart' as di;
 
 // Arranque por defecto (útil si ejecutas `flutter run` sin --target)
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppSupabaseConfig.initialize();
+  di.setupDependencies(); // Configurar dependencias
   runApp(const MyApp());
 }
 
@@ -14,21 +19,20 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Sistema Telmex',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF003366), // Azul corporativo Telmex
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF003366),
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
+    return ChangeNotifierProvider(
+      create: (context) => ThemeProvider(),
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, child) {
+          return MaterialApp(
+            title: 'Sistema Larga Distancia',
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: themeProvider.themeMode,
+            debugShowCheckedModeBanner: false,
+            home: const LoginScreen(),
+          );
+        },
       ),
-      home: const LoginScreen(),
     );
   }
 }

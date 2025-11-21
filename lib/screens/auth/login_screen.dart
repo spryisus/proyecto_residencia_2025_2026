@@ -1,9 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:bcrypt/bcrypt.dart';
 import '../../base_conexion/conexion_db.dart';
-import '../inventory/inventory_screen.dart';
+import '../../core/di/injection_container.dart';
+import '../../data/local/inventory_session_storage.dart';
+import '../../domain/entities/inventory_session.dart';
+import '../../domain/repositories/inventario_repository.dart';
+import '../../app/config/supabase_client.dart' show supabaseClient;
+import '../inventory/inventory_type_selection_screen.dart';
+import '../inventory/category_inventory_screen.dart';
+import '../inventory/jumper_categories_screen.dart' show JumperCategories, JumperCategory, JumperCategoriesScreen;
 import '../shipments/shipments_screen.dart';
 import '../admin/admin_dashboard.dart';
+import '../settings/settings_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -18,6 +28,30 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isTestingConnection = false;
   bool _isLoggingIn = false;
+
+  /// Guarda la sesión del usuario en SharedPreferences
+  Future<void> _saveSession(String idEmpleado, String nombreUsuario) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('id_empleado', idEmpleado);
+    await prefs.setString('nombre_usuario', nombreUsuario);
+    await prefs.setBool('is_logged_in', true);
+  }
+
+  /// Valida la contraseña (soporta texto plano y bcrypt)
+  bool _validatePassword(String inputPassword, String storedPassword) {
+    // Si la contraseña almacenada parece un hash bcrypt (empieza con $2a$ o $2b$)
+    if (storedPassword.startsWith('\$2a\$') || storedPassword.startsWith('\$2b\$') || storedPassword.startsWith('\$2y\$')) {
+      try {
+        // bcrypt 1.1.3 usa BCrypt.checkpw
+        return BCrypt.checkpw(inputPassword, storedPassword);
+      } catch (e) {
+        print('Error al verificar bcrypt: $e');
+        return false;
+      }
+    }
+    // Si no es bcrypt, comparar directamente (texto plano)
+    return inputPassword == storedPassword;
+  }
 
   Future<void> _testConnection() async {
     setState(() {
@@ -76,19 +110,54 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      // Login usando Supabase Auth
       final supabase = Supabase.instance.client;
-      final user = await supabase
-          .from('t_empleados_ld')
-          .select()
-          .eq('nombre_usuario', _usernameController.text.trim())
-          .eq('contrasena', _passwordController.text)
-          .inFilter('rol', ['admin', 'normal'])
+      final nombreUsuario = _usernameController.text.trim();
+      final password = _passwordController.text;
+
+      // Buscar el empleado por nombre_usuario
+      final empleado = await supabase
+          .from('t_empleados')
+          .select('id_empleado, nombre_usuario, contrasena, activo')
+          .eq('nombre_usuario', nombreUsuario)
           .maybeSingle();
 
-      if (user == null) {
-        throw 'Credenciales inválidas';
+      if (empleado == null) {
+        throw 'Usuario o contraseña incorrectos';
       }
+
+      // Verificar que el usuario esté activo
+      if (empleado['activo'] != true) {
+        throw 'Usuario inactivo en el sistema';
+      }
+
+      // Validar la contraseña
+      final storedPassword = empleado['contrasena'] as String;
+      if (!_validatePassword(password, storedPassword)) {
+        throw 'Usuario o contraseña incorrectos';
+      }
+
+      // Obtener los roles del empleado
+      final empleadoId = empleado['id_empleado'] as String;
+      final roles = await supabase
+          .from('t_empleado_rol')
+          .select('t_roles!inner(nombre)')
+          .eq('id_empleado', empleadoId);
+
+      if (roles.isEmpty) {
+        throw 'Usuario sin roles asignados';
+      }
+
+      // Verificar que tenga al menos uno de los roles permitidos
+      final rolesPermitidos = ['admin', 'operador', 'auditor'];
+      final tieneRolPermitido = roles.any((rol) => 
+          rolesPermitidos.contains(rol['t_roles']['nombre']?.toString().toLowerCase()));
+
+      if (!tieneRolPermitido) {
+        throw 'Usuario sin permisos suficientes';
+      }
+
+      // Guardar sesión
+      await _saveSession(empleadoId, nombreUsuario);
 
       if (!mounted) return;
       // Notificación breve y navegación según rol
@@ -101,19 +170,38 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       await Future.delayed(const Duration(milliseconds: 300));
       if (!mounted) return;
-      final String rol = (user['rol']?.toString().toLowerCase() ?? 'usuario');
-      if (rol == 'admin') {
+      
+      // Determinar el rol principal del usuario
+      final rolPrincipal = roles.first['t_roles']['nombre']?.toString().toLowerCase() ?? 'usuario';
+      
+      if (rolPrincipal == 'admin') {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => AdminDashboard(username: _usernameController.text.trim()),
+            builder: (_) => AdminDashboard(username: nombreUsuario),
           ),
         );
       } else {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => WelcomePage(username: _usernameController.text.trim()),
+            builder: (_) => WelcomePage(username: nombreUsuario),
+          ),
+        );
+      }
+    } on PostgrestException catch (e) {
+      String mensaje = 'Error de conexión con la base de datos';
+      if (e.code == 'PGRST116') {
+        mensaje = 'Usuario o contraseña incorrectos';
+      } else {
+        mensaje = e.message.isNotEmpty ? e.message : mensaje;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ $mensaje'),
+            backgroundColor: const Color.fromRGBO(244, 67, 54, 1),
+            duration: const Duration(seconds: 3),
           ),
         );
       }
@@ -140,14 +228,19 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('Inicio de sesión Telmex'),
+        title: const Text('Inicio de sesión Larga Distancia'),
         centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.cloud_done),
-            onPressed: _isTestingConnection ? null : _testConnection,
-            tooltip: 'Probar conexión',
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const SettingsScreen(),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -186,13 +279,13 @@ class _LoginScreenState extends State<LoginScreen> {
                           controller: _usernameController,
                           keyboardType: TextInputType.text,
                           decoration: const InputDecoration(
-                            labelText: 'Nombre de Usuario',
+                            labelText: 'Correo de usuario',
                             prefixIcon: Icon(Icons.person_outline),
                             border: OutlineInputBorder(),
                           ),
                           validator: (value) {
                             final text = value?.trim() ?? '';
-                            if (text.isEmpty) return 'Ingresa tu usuario';
+                            if (text.isEmpty) return 'Ingresa tu correo';
                             return null;
                           },
                         ),
@@ -250,17 +343,199 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-class WelcomePage extends StatelessWidget {
+class WelcomePage extends StatefulWidget {
   final String? username;
   const WelcomePage({super.key, this.username});
 
   @override
+  State<WelcomePage> createState() => _WelcomePageState();
+}
+
+class _WelcomePageState extends State<WelcomePage> {
+  final InventorySessionStorage _sessionStorage = serviceLocator.get<InventorySessionStorage>();
+  final InventarioRepository _inventarioRepository = serviceLocator.get<InventarioRepository>();
+  List<InventorySession> _sessions = [];
+  bool _isLoadingSessions = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSessions();
+  }
+
+  Future<void> _loadSessions() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isLoadingSessions = true;
+    });
+    
+    final sessions = await _sessionStorage.getAllSessions();
+    
+    // Verificar si el usuario es admin
+    final isAdmin = await _checkIsAdmin();
+    
+    // Obtener el id_empleado del usuario actual
+    final prefs = await SharedPreferences.getInstance();
+    final currentUserId = prefs.getString('id_empleado');
+    
+    // Filtrar SOLO inventarios pendientes
+    var pendingSessions = sessions.where((s) {
+      // Asegurarse de que solo se incluyan los que tienen estado pending
+      final isPending = s.status == InventorySessionStatus.pending;
+      if (!isPending) return false;
+      
+      // Si es admin, mostrar todos los pendientes
+      // Si no es admin, solo mostrar los del usuario actual
+      if (isAdmin) {
+        return true;
+      } else {
+        // Solo mostrar inventarios del usuario actual
+        return s.ownerId == currentUserId;
+      }
+    }).toList();
+    
+    if (!mounted) return;
+    setState(() {
+      _sessions = pendingSessions;
+      _isLoadingSessions = false;
+    });
+  }
+
+  Future<void> _openSession(InventorySession session) async {
+    try {
+      final categoria = await _inventarioRepository.getCategoriaById(session.categoryId);
+      if (categoria == null) {
+        throw 'La categoría asociada ya no existe.';
+      }
+
+      // Verificar si es Jumpers y si tiene subcategoría en el nombre
+      final categoryNameLower = session.categoryName.toLowerCase();
+      if (categoryNameLower.contains('jumper')) {
+        // Intentar detectar si hay una subcategoría en el nombre (ej: "Jumpers FC-FC")
+        JumperCategory? detectedJumperCategory;
+        for (final jumperCategory in JumperCategories.all) {
+          if (session.categoryName.contains(jumperCategory.displayName)) {
+            detectedJumperCategory = jumperCategory;
+            break;
+          }
+        }
+
+        if (detectedJumperCategory != null) {
+          // Si hay subcategoría, navegar directamente a la pantalla de inventario con el filtro
+          final isAdmin = await _checkIsAdmin();
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CategoryInventoryScreen(
+                categoria: categoria,
+                categoriaNombre: session.categoryName,
+                sessionId: session.id,
+                isAdmin: isAdmin,
+                jumperCategoryFilter: detectedJumperCategory,
+              ),
+            ),
+          );
+        } else {
+          // Si no hay subcategoría, navegar a la pantalla de categorías de jumpers
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => JumperCategoriesScreen(
+                categoria: categoria,
+                categoriaNombre: session.categoryName,
+                sessionId: session.id, // Pasar el sessionId para cargar la sesión pendiente
+              ),
+            ),
+          );
+        }
+      } else {
+        // Para otras categorías, navegar directamente a la pantalla de inventario
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CategoryInventoryScreen(
+              categoria: categoria,
+              categoriaNombre: session.categoryName,
+              sessionId: session.id,
+            ),
+          ),
+        );
+      }
+      await _loadSessions();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo abrir el inventario guardado: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteSession(InventorySession session) async {
+    await _sessionStorage.deleteSession(session.id);
+    await _loadSessions();
+  }
+
+  Future<bool> _checkIsAdmin() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final idEmpleado = prefs.getString('id_empleado');
+      
+      if (idEmpleado == null) {
+        return false;
+      }
+      
+      final roles = await supabaseClient
+          .from('t_empleado_rol')
+          .select('t_roles!inner(nombre)')
+          .eq('id_empleado', idEmpleado);
+      
+      final isAdmin = roles.any((rol) => 
+          rol['t_roles']['nombre']?.toString().toLowerCase() == 'admin');
+      
+      return isAdmin;
+    } catch (e) {
+      debugPrint('Error al verificar rol de admin: $e');
+      return false;
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    final local = date.toLocal();
+    final day = local.day.toString().padLeft(2, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final year = local.year;
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year $hour:$minute';
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final username = widget.username;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Bienvenido'),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _isLoadingSessions ? null : () async {
+              await _loadSessions();
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Datos actualizados'),
+                  duration: Duration(seconds: 1),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            },
+            tooltip: 'Refrescar',
+          ),
           IconButton(
             icon: const Icon(Icons.cloud_done),
             onPressed: () async {
@@ -281,6 +556,22 @@ class WelcomePage extends StatelessWidget {
             },
             tooltip: 'Probar conexión',
           ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const SettingsScreen(),
+                ),
+              );
+              // Recargar sesiones cuando se vuelve
+              if (mounted) {
+                _loadSessions();
+              }
+            },
+            tooltip: 'Configuración',
+          ),
         ],
       ),
       drawer: Drawer(
@@ -288,25 +579,30 @@ class WelcomePage extends StatelessWidget {
           padding: EdgeInsets.zero,
           children: [
             DrawerHeader(
-              decoration: const BoxDecoration(color: Color(0xFF003366)),
+              decoration: BoxDecoration(
+                color: Theme.of(context).primaryColor,
+              ),
               child: Align(
                 alignment: Alignment.bottomLeft,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.end,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Menú',
-                      style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 8),
-                    if (username != null && username!.isNotEmpty)
+                    if (username != null && username.isNotEmpty)
                       Row(
                         children: [
                           const Icon(Icons.person, color: Colors.white70, size: 18),
                           const SizedBox(width: 6),
                           Text(
-                            username!,
+                            username,
                             style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
                           ),
                         ],
@@ -316,100 +612,212 @@ class WelcomePage extends StatelessWidget {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.inventory_2_outlined, size: 24),
-              title: const Text(
+              leading: Icon(
+                Icons.inventory_2_outlined, 
+                size: 24,
+                color: Theme.of(context).iconTheme.color,
+              ),
+              title: Text(
                 'Inventarios',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
               ),
               minVerticalPadding: 16,
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                Navigator.push(
+                await Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const InventoryScreen()),
+                  MaterialPageRoute(builder: (_) => const InventoryTypeSelectionScreen()),
                 );
+                // Recargar sesiones cuando se vuelve de la pantalla de inventarios
+                if (mounted) {
+                  _loadSessions();
+                }
               },
             ),
             ListTile(
-              leading: const Icon(Icons.local_shipping_outlined, size: 24),
-              title: const Text(
+              leading: Icon(
+                Icons.local_shipping_outlined, 
+                size: 24,
+                color: Theme.of(context).iconTheme.color,
+              ),
+              title: Text(
                 'Envíos',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
               ),
               minVerticalPadding: 16,
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                Navigator.push(
+                await Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const ShipmentsScreen()),
                 );
+                // Recargar sesiones cuando se vuelve
+                if (mounted) {
+                  _loadSessions();
+                }
               },
             ),
             const Divider(height: 24),
             ListTile(
-              leading: const Icon(Icons.settings_outlined, size: 24),
-              title: const Text(
+              leading: Icon(
+                Icons.settings_outlined, 
+                size: 24,
+                color: Theme.of(context).iconTheme.color,
+              ),
+              title: Text(
                 'Ajustes',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
               ),
               minVerticalPadding: 16,
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Ajustes (próximamente)'),
-                    duration: Duration(seconds: 2),
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const SettingsScreen(),
                   ),
                 );
+                // Recargar sesiones cuando se vuelve
+                if (mounted) {
+                  _loadSessions();
+                }
               },
             ),
           ],
         ),
       ),
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const Text(
-              'BIENVENIDO AL SISTEMA',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF003366),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                'BIENVENIDO AL SISTEMA DE LARGA DISTANCIA',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).primaryColor,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: 280,
-              height: 56,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const LoginScreen(),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: 280,
+                height: 56,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const LoginScreen(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.logout, size: 24),
+                  label: Text(
+                    'Volver al login',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
                     ),
-                  );
-                },
-                icon: const Icon(Icons.logout, size: 24),
-                label: const Text(
-                  'Volver al login',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF003366),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
                   ),
-                  elevation: 4,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).primaryColor,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 4,
+                  ),
                 ),
               ),
+              const SizedBox(height: 24),
+              _buildSessionSection(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSessionSection() {
+    if (_isLoadingSessions) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 16),
+        child: CircularProgressIndicator(),
+      );
+    }
+    if (_sessions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'Inventarios guardados',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        ..._sessions.map(_buildSessionCard),
+      ],
+    );
+  }
+
+  Widget _buildSessionCard(InventorySession session) {
+    final isPending = session.status == InventorySessionStatus.pending;
+    final Color chipColor = isPending ? Colors.orange : Colors.green;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: chipColor.withValues(alpha: 0.15),
+          child: Icon(
+            isPending ? Icons.pause_circle_outline : Icons.check_circle_outline,
+            color: chipColor,
+          ),
+        ),
+        title: Text(session.categoryName),
+        subtitle: Text('Actualizado: ${_formatDate(session.updatedAt)}'),
+        trailing: Wrap(
+          spacing: 8,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: chipColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                isPending ? 'Pendiente' : 'Terminado',
+                style: TextStyle(
+                  color: chipColor,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20),
+              color: Colors.red[300],
+              onPressed: () => _deleteSession(session),
             ),
           ],
         ),
+        onTap: () => _openSession(session),
       ),
     );
   }
