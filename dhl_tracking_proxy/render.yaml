@@ -5,7 +5,7 @@ services:
   - type: web
     name: dhl-tracking-proxy
     env: node
-    buildCommand: npm install
+    buildCommand: npm install && npm run download-chrome || echo "Chrome se descargará al primer uso"
     startCommand: npm start
     envVars:
       - key: NODE_ENV

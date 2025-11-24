@@ -10,6 +10,58 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Variable global para rastrear si Chrome ya se está descargando
+let chromeDownloading = false;
+let chromeDownloadPromise = null;
+
+// Función para asegurar que Chrome esté disponible
+async function ensureChrome() {
+  // Si ya está descargando, esperar a que termine
+  if (chromeDownloading && chromeDownloadPromise) {
+    return await chromeDownloadPromise;
+  }
+  
+  // Si ya está disponible, retornar inmediatamente
+  try {
+    const fs = require('fs');
+    const chromePath = puppeteer.executablePath();
+    if (fs.existsSync(chromePath)) {
+      return true;
+    }
+  } catch (error) {
+    // Chrome no está disponible
+  }
+  
+  // Marcar que estamos descargando
+  chromeDownloading = true;
+  
+  // Crear promesa para descargar Chrome
+  chromeDownloadPromise = (async () => {
+    try {
+      console.log('⚠️ Chrome no está disponible. Descargando Chrome...');
+      console.log('⏱️  Esto puede tardar 2-3 minutos la primera vez...');
+      
+      const { execSync } = require('child_process');
+      execSync('npx -y @puppeteer/browsers install chrome@stable', {
+        stdio: 'inherit',
+        timeout: 180000, // 3 minutos
+        env: process.env
+      });
+      
+      console.log('✅ Chrome descargado correctamente');
+      chromeDownloading = false;
+      return true;
+    } catch (downloadError) {
+      console.log('⚠️ No se pudo descargar Chrome automáticamente.');
+      console.log('💡 Se intentará usar Chrome del sistema si está disponible.');
+      chromeDownloading = false;
+      return false;
+    }
+  })();
+  
+  return await chromeDownloadPromise;
+}
+
 /**
  * Ruta raíz - Información del servicio
  * GET /
@@ -47,8 +99,21 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
   try {
     console.log(`🔍 Consultando tracking: ${trackingNumber}`);
     
+    // Asegurar que Chrome esté disponible (esta función es idempotente)
+    await ensureChrome();
+    
+    // Verificar si Chrome está disponible
+    try {
+      const fs = require('fs');
+      const chromePath = puppeteer.executablePath();
+      if (fs.existsSync(chromePath)) {
+        console.log(`📍 Chrome disponible en: ${chromePath}`);
+      }
+    } catch (error) {
+      console.log('⚠️ Chrome aún no está disponible, Puppeteer intentará encontrarlo...');
+    }
+    
     // Configurar opciones de lanzamiento para Render
-    // Puppeteer descargará Chrome automáticamente si no está disponible
     const launchOptions = {
       headless: 'new', // Usar el nuevo modo headless (más estable)
       args: [
@@ -65,8 +130,6 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     };
     
     console.log('🚀 Iniciando Puppeteer...');
-    console.log('💡 Si Chrome no está instalado, Puppeteer lo descargará automáticamente (esto puede tardar 2-3 minutos la primera vez)...');
-    
     browser = await puppeteer.launch(launchOptions);
     console.log('✅ Puppeteer iniciado correctamente');
 
@@ -588,6 +651,11 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
  */
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'DHL Tracking Proxy' });
+});
+
+// Iniciar verificación de Chrome en background al iniciar el servidor
+ensureChrome().catch(err => {
+  console.log('⚠️ Error al verificar Chrome:', err.message);
 });
 
 // Iniciar servidor en todas las interfaces (0.0.0.0) para que sea accesible desde la red local
