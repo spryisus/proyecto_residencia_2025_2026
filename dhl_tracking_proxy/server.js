@@ -847,12 +847,31 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
           });
         });
         
-        return events;
+        return { events, errorMessages };
       });
       
-      if (aggressiveData && aggressiveData.length > 0) {
-        trackingData.events = aggressiveData;
-        console.log(`✅ Encontrados ${aggressiveData.length} eventos con scraping agresivo`);
+      // Si encontramos mensajes de error, actualizar el estado
+      if (aggressiveData && aggressiveData.errorMessages && aggressiveData.errorMessages.length > 0) {
+        const errorMsg = aggressiveData.errorMessages[0];
+        console.log(`⚠️ Mensaje de error de DHL detectado: ${errorMsg.substring(0, 100)}`);
+        trackingData.status = 'No encontrado';
+        
+        // Agregar el mensaje de error como un evento informativo si no hay otros eventos
+        if (!trackingData.events || trackingData.events.length === 0) {
+          trackingData.events.push({
+            description: errorMsg,
+            timestamp: new Date().toISOString(),
+            location: null,
+            status: 'No encontrado',
+          });
+        }
+      }
+      
+      // Si encontramos eventos, agregarlos
+      if (aggressiveData && aggressiveData.events && aggressiveData.events.length > 0) {
+        if (!trackingData.events) trackingData.events = [];
+        trackingData.events = trackingData.events.concat(aggressiveData.events);
+        console.log(`✅ Encontrados ${aggressiveData.events.length} eventos adicionales con scraping agresivo`);
       }
     }
     
