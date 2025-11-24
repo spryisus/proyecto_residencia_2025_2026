@@ -47,7 +47,8 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
   try {
     console.log(`🔍 Consultando tracking: ${trackingNumber}`);
     
-    // Iniciar navegador headless
+    // Configurar opciones de lanzamiento para Render
+    // Puppeteer descargará Chrome automáticamente si no está disponible
     const launchOptions = {
       headless: 'new', // Usar el nuevo modo headless (más estable)
       args: [
@@ -64,6 +65,8 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     };
     
     console.log('🚀 Iniciando Puppeteer...');
+    console.log('💡 Si Chrome no está instalado, Puppeteer lo descargará automáticamente (esto puede tardar 2-3 minutos la primera vez)...');
+    
     browser = await puppeteer.launch(launchOptions);
     console.log('✅ Puppeteer iniciado correctamente');
 
