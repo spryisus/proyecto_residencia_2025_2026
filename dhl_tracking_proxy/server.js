@@ -15,21 +15,68 @@ let chromeDownloading = false;
 let chromeDownloadPromise = null;
 
 // Función para asegurar que Chrome esté disponible
+// Función para buscar Chrome en diferentes ubicaciones
+function findChromeExecutable() {
+  const fs = require('fs');
+  const path = require('path');
+  
+  // 1. Buscar Chrome descargado por @puppeteer/browsers (ubicación común)
+  const chromeDir = path.join(process.cwd(), 'chrome');
+  if (fs.existsSync(chromeDir)) {
+    try {
+      const dirs = fs.readdirSync(chromeDir);
+      for (const dir of dirs) {
+        if (dir.startsWith('linux-')) {
+          const chromePath = path.join(chromeDir, dir, 'chrome-linux64', 'chrome');
+          if (fs.existsSync(chromePath)) {
+            return chromePath;
+          }
+        }
+      }
+    } catch (e) {
+      // Continuar buscando
+    }
+  }
+  
+  // 2. Intentar la ruta por defecto de Puppeteer
+  try {
+    const defaultPath = puppeteer.executablePath();
+    if (defaultPath && fs.existsSync(defaultPath)) {
+      return defaultPath;
+    }
+  } catch (e) {
+    // Continuar
+  }
+  
+  // 3. Buscar en node_modules/puppeteer/.local-chromium
+  try {
+    const puppeteerChromiumDir = path.join(process.cwd(), 'node_modules', 'puppeteer', '.local-chromium');
+    if (fs.existsSync(puppeteerChromiumDir)) {
+      const dirs = fs.readdirSync(puppeteerChromiumDir);
+      for (const dir of dirs) {
+        const chromePath = path.join(puppeteerChromiumDir, dir, 'chrome-linux', 'chrome');
+        if (fs.existsSync(chromePath)) {
+          return chromePath;
+        }
+      }
+    }
+  } catch (e) {
+    // Continuar
+  }
+  
+  return null;
+}
+
 async function ensureChrome() {
   // Si ya está descargando, esperar a que termine
   if (chromeDownloading && chromeDownloadPromise) {
     return await chromeDownloadPromise;
   }
   
-  // Si ya está disponible, retornar inmediatamente
-  try {
-    const fs = require('fs');
-    const chromePath = puppeteer.executablePath();
-    if (fs.existsSync(chromePath)) {
-      return true;
-    }
-  } catch (error) {
-    // Chrome no está disponible
+  // Primero buscar si Chrome ya está disponible
+  const existingChrome = findChromeExecutable();
+  if (existingChrome) {
+    return existingChrome;
   }
   
   // Marcar que estamos descargando
@@ -49,13 +96,16 @@ async function ensureChrome() {
       });
       
       console.log('✅ Chrome descargado correctamente');
+      
+      // Buscar el Chrome descargado
+      const downloadedChrome = findChromeExecutable();
       chromeDownloading = false;
-      return true;
+      return downloadedChrome || true;
     } catch (downloadError) {
       console.log('⚠️ No se pudo descargar Chrome automáticamente.');
       console.log('💡 Se intentará usar Chrome del sistema si está disponible.');
       chromeDownloading = false;
-      return false;
+      return null;
     }
   })();
   
@@ -99,19 +149,8 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
   try {
     console.log(`🔍 Consultando tracking: ${trackingNumber}`);
     
-    // Asegurar que Chrome esté disponible (esta función es idempotente)
-    await ensureChrome();
-    
-    // Verificar si Chrome está disponible
-    try {
-      const fs = require('fs');
-      const chromePath = puppeteer.executablePath();
-      if (fs.existsSync(chromePath)) {
-        console.log(`📍 Chrome disponible en: ${chromePath}`);
-      }
-    } catch (error) {
-      console.log('⚠️ Chrome aún no está disponible, Puppeteer intentará encontrarlo...');
-    }
+    // Asegurar que Chrome esté disponible y obtener su ruta
+    const chromePath = await ensureChrome();
     
     // Configurar opciones de lanzamiento para Render
     const launchOptions = {
@@ -128,6 +167,21 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
         '--single-process', // Para entornos con poca memoria como Render
       ],
     };
+    
+    // Si encontramos Chrome, especificarlo explícitamente
+    if (chromePath && typeof chromePath === 'string') {
+      launchOptions.executablePath = chromePath;
+      console.log(`📍 Usando Chrome en: ${chromePath}`);
+    } else {
+      // Intentar encontrar Chrome manualmente
+      const foundChrome = findChromeExecutable();
+      if (foundChrome) {
+        launchOptions.executablePath = foundChrome;
+        console.log(`📍 Chrome encontrado en: ${foundChrome}`);
+      } else {
+        console.log('⚠️ Chrome no encontrado en ubicaciones esperadas, Puppeteer intentará encontrarlo...');
+      }
+    }
     
     console.log('🚀 Iniciando Puppeteer...');
     browser = await puppeteer.launch(launchOptions);
@@ -654,7 +708,14 @@ app.get('/health', (req, res) => {
 });
 
 // Iniciar verificación de Chrome en background al iniciar el servidor
-ensureChrome().catch(err => {
+// Esto pre-descarga Chrome si no está disponible
+ensureChrome().then(chromePath => {
+  if (chromePath) {
+    console.log('✅ Chrome está listo para usar');
+  } else {
+    console.log('⚠️ Chrome se descargará cuando sea necesario');
+  }
+}).catch(err => {
   console.log('⚠️ Error al verificar Chrome:', err.message);
 });
 
