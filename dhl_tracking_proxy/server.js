@@ -11,6 +11,24 @@ app.use(cors());
 app.use(express.json());
 
 /**
+ * Ruta raíz - Información del servicio
+ * GET /
+ */
+app.get('/', (req, res) => {
+  res.json({
+    service: 'DHL Tracking Proxy',
+    status: 'running',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      track: '/api/track/:trackingNumber',
+      example: '/api/track/6376423056'
+    },
+    documentation: 'Este servicio permite consultar el estado de envíos DHL usando web scraping.'
+  });
+});
+
+/**
  * Endpoint para consultar tracking de DHL
  * GET /api/track/:trackingNumber
  */
