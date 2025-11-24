@@ -48,7 +48,6 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     console.log(`🔍 Consultando tracking: ${trackingNumber}`);
     
     // Iniciar navegador headless
-    // NO especificar executablePath - dejar que Puppeteer use el Chrome que descargó
     const launchOptions = {
       headless: 'new', // Usar el nuevo modo headless (más estable)
       args: [
@@ -64,9 +63,6 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       ],
     };
     
-    // NO especificar executablePath - Puppeteer encontrará Chrome automáticamente
-    // Esto usa el Chrome que viene con el paquete de Puppeteer
-    console.log('📍 Usando Chrome de Puppeteer (bundled - descargado durante npm install)');
     console.log('🚀 Iniciando Puppeteer...');
     browser = await puppeteer.launch(launchOptions);
     console.log('✅ Puppeteer iniciado correctamente');
