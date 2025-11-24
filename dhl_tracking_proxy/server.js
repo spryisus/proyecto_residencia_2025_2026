@@ -205,7 +205,7 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       waitUntil: 'domcontentloaded',
       timeout: 45000,
     });
-    
+
     console.log('⏳ Esperando a que cargue el contenido dinámico...');
     // Esperar más tiempo para que carguen los scripts dinámicos de DHL
     await page.waitForTimeout(8000);
@@ -297,7 +297,7 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
         if (!trackingContainer) {
           trackingContainer = document.querySelector('[class*="tracking"], [class*="shipment"], [id*="tracking"], [id*="shipment"]') ||
                              document.querySelector('main, [role="main"], article') ||
-                             document.body;
+                                 document.body;
         }
         
         // Buscar en TODO el body si no encontramos nada útil en el contenedor
@@ -336,7 +336,7 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
 
         // Buscar estado también en el body completo
         const statusContainer = searchInBody;
-        
+
         let statusFound = false;
         for (const selector of statusSelectors) {
           const elements = statusContainer.querySelectorAll(selector);
@@ -654,7 +654,7 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
         }
         
         // Buscar en todas las listas (ul, ol) - hay 31 listas según los logs
-        const lists = document.querySelectorAll('ul, ol');
+        const allLists = document.querySelectorAll('ul, ol');
         lists.forEach((list) => {
           const items = list.querySelectorAll('li');
           items.forEach((item) => {
@@ -791,9 +791,9 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
           });
         });
         
-        // Buscar en listas ordenadas y desordenadas
-        const lists = document.querySelectorAll('ol, ul');
-        lists.forEach((list) => {
+        // Buscar en listas ordenadas y desordenadas (segunda pasada)
+        const moreLists = document.querySelectorAll('ol, ul');
+        moreLists.forEach((list) => {
           const items = list.querySelectorAll('li');
           items.forEach((item) => {
             const text = item.textContent.trim();
