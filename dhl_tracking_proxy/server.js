@@ -30,7 +30,11 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     console.log(`🔍 Consultando tracking: ${trackingNumber}`);
     
     // Iniciar navegador headless
-    browser = await puppeteer.launch({
+    // Render ya tiene Chrome instalado, usamos el del sistema si está disponible
+    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || 
+                          (process.env.RENDER ? '/usr/bin/google-chrome-stable' : undefined);
+    
+    const launchOptions = {
       headless: true, // Cambiar a false para ver el navegador
       args: [
         '--no-sandbox',
@@ -38,8 +42,16 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
+        '--single-process', // Para entornos con poca memoria como Render
       ],
-    });
+    };
+    
+    // Usar Chrome del sistema si está disponible (Render)
+    if (executablePath) {
+      launchOptions.executablePath = executablePath;
+    }
+    
+    browser = await puppeteer.launch(launchOptions);
 
     const page = await browser.newPage();
     

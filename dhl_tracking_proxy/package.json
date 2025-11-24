@@ -12,6 +12,9 @@
     "dev": "nodemon server.js",
     "postinstall": "node -e \"console.log('✅ Dependencies installed successfully')\""
   },
+  "puppeteer": {
+    "skipChromiumDownload": true
+  },
   "keywords": ["dhl", "tracking", "proxy", "scraping"],
   "author": "",
   "license": "ISC",
