@@ -283,6 +283,9 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
           '[data-testid*="tracking"]',
           'main[class*="tracking"]',
           'div[class*="tracking-container"]',
+          'div[class*="tracking-result"]',
+          'section[class*="tracking"]',
+          '[class*="shipment-status"]',
         ];
         
         for (const selector of specificSelectors) {
@@ -293,17 +296,27 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
         // Si no encontramos uno específico, buscar más genéricos
         if (!trackingContainer) {
           trackingContainer = document.querySelector('[class*="tracking"], [class*="shipment"], [id*="tracking"], [id*="shipment"]') ||
-                             document.querySelector('main, [role="main"]') ||
+                             document.querySelector('main, [role="main"], article') ||
                              document.body;
         }
         
+        // Buscar en TODO el body si no encontramos nada útil en el contenedor
+        // A veces DHL pone la información fuera del contenedor principal
+        const searchInBody = document.body;
+        
         // Debug: contar elementos encontrados
-        const tables = trackingContainer.querySelectorAll('table');
-        const divs = trackingContainer.querySelectorAll('div[class*="event"], div[class*="tracking"], div[class*="shipment"]');
+        const tables = searchInBody.querySelectorAll('table');
+        const divs = searchInBody.querySelectorAll('div[class*="event"], div[class*="tracking"], div[class*="shipment"], div[class*="status"]');
+        const allText = searchInBody.innerText;
+        
         data.debug = {
           tablesFound: tables.length,
           divsFound: divs.length,
+          bodyTextLength: allText.length,
         };
+        
+        // Usar el body completo si no encontramos un contenedor específico útil
+        const finalContainer = tables.length > 0 || divs.length > 10 ? searchInBody : trackingContainer;
 
         // Buscar estado en elementos específicos de tracking - más selectores de DHL
         const statusSelectors = [
@@ -321,9 +334,12 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
           'span[class*="status"]',
         ];
 
+        // Buscar estado también en el body completo
+        const statusContainer = searchInBody;
+        
         let statusFound = false;
         for (const selector of statusSelectors) {
-          const elements = trackingContainer.querySelectorAll(selector);
+          const elements = statusContainer.querySelectorAll(selector);
           for (const elem of elements) {
             const text = elem.textContent.trim();
             const textLower = text.toLowerCase();
@@ -369,8 +385,10 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
           // Tablas de tracking (muy común en DHL)
           'table tr',
           'table tbody tr',
+          'table thead tr',
           '[class*="tracking"] table tr',
           '[class*="shipment"] table tr',
+          'div[class*="table"] tr',
           // Listas
           '[class*="timeline"] li',
           '[class*="tracking-event"]',
@@ -379,26 +397,39 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
           '[class*="event"]',
           '[class*="status-item"]',
           '[class*="tracking-step"]',
+          '[class*="step"]',
           'ol[class*="tracking"] li',
           'ul[class*="tracking"] li',
-          'div[class*="tracking"] > div',
+          'ol li',
+          'ul li',
           // Divs con información de tracking
+          'div[class*="tracking"] > div',
+          'div[class*="shipment"] > div',
+          'div[class*="event"]',
+          'div[class*="status"]',
           '[class*="tracking"] > div',
           '[class*="shipment"] > div',
           // Elementos con data attributes
           '[data-tracking-event]',
           '[data-status]',
-          // Cualquier elemento que contenga fechas y estados
-          'div:has-text("entregado"), div:has-text("delivered")',
-          'div:has-text("tránsito"), div:has-text("transit")',
+          '[data-event]',
+          // Más genéricos - buscar cualquier div que contenga texto relevante
+          'div[class*="row"]',
+          'div[class*="card"]',
+          'div[class*="item"]',
         ];
 
         const seenEvents = new Set();
-        const excludedTexts = ['menú', 'menu', 'servicio al cliente', 'encontrar', 'obtener', 'enviar ahora', 'solicitar', 'explorar', 'seleccione', 'cambiar', 'cookie', 'privacidad', 'términos'];
+        const excludedTexts = ['menú', 'menu', 'servicio al cliente', 'encontrar', 'obtener', 'enviar ahora', 'solicitar', 'explorar', 'seleccione', 'cambiar', 'cookie', 'privacidad', 'términos', 'consentimiento', 'aceptar', 'rechazar'];
+        
+        // Determinar qué contenedor usar para buscar eventos
+        // Usar el body completo si hay tablas o muchos divs, sino usar el contenedor específico
+        const useBodyForSearch = tables.length > 0 || divs.length > 10;
+        const containerToSearch = useBodyForSearch ? searchInBody : trackingContainer;
         
         for (const selector of eventSelectors) {
           try {
-            const elements = trackingContainer.querySelectorAll(selector);
+            const elements = containerToSearch.querySelectorAll(selector);
             for (const elem of elements) {
               const text = elem.textContent.trim();
               
@@ -571,9 +602,29 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       return data;
     });
 
-    // Si no encontramos eventos, hacer un scraping más agresivo
+    // Capturar un fragmento del HTML para debugging si no encontramos eventos
     if (trackingData.events.length === 0) {
-      console.log('⚠️  No se encontraron eventos, intentando scraping más agresivo...');
+      console.log('⚠️  No se encontraron eventos, capturando HTML para análisis...');
+      
+      // Capturar el HTML completo del body para analizar
+      const pageContent = await page.evaluate(() => {
+        return {
+          bodyText: document.body.innerText.substring(0, 2000), // Primeros 2000 caracteres
+          allText: document.body.textContent.substring(0, 1000),
+          title: document.title,
+          hasTables: document.querySelectorAll('table').length,
+          hasLists: document.querySelectorAll('ul, ol').length,
+          allDivs: Array.from(document.querySelectorAll('div')).slice(0, 20).map(div => ({
+            classes: div.className,
+            text: div.textContent.trim().substring(0, 100)
+          }))
+        };
+      });
+      
+      console.log(`📄 Debug HTML: Título="${pageContent.title}", Tablas=${pageContent.hasTables}, Listas=${pageContent.hasLists}`);
+      console.log(`📝 Primeros caracteres del body: ${pageContent.bodyText.substring(0, 200)}`);
+      
+      console.log('⚠️  Intentando scraping más agresivo...');
       
       // Intentar extraer de cualquier tabla o lista visible
       const aggressiveData = await page.evaluate(() => {
