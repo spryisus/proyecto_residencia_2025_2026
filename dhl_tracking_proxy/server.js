@@ -199,26 +199,47 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     
     console.log(`📡 Navegando a: ${trackingUrl}`);
     
-    // Ir a la página con timeout
+    // Ir a la página con timeout más largo
+    console.log('⏳ Cargando página de DHL...');
     await page.goto(trackingUrl, {
-      waitUntil: 'networkidle2', // Esperar a que la red esté inactiva
-      timeout: 30000,
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
     });
-
+    
+    console.log('⏳ Esperando a que cargue el contenido dinámico...');
     // Esperar más tiempo para que carguen los scripts dinámicos de DHL
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(8000);
+    
+    // Esperar específicamente por elementos comunes de DHL
+    console.log('🔍 Buscando elementos de tracking...');
+    try {
+      // Intentar esperar por varios selectores que DHL usa
+      await Promise.race([
+        page.waitForSelector('table', { timeout: 10000 }).catch(() => null),
+        page.waitForSelector('[class*="timeline"]', { timeout: 10000 }).catch(() => null),
+        page.waitForSelector('[class*="tracking"]', { timeout: 10000 }).catch(() => null),
+        page.waitForSelector('[class*="shipment"]', { timeout: 10000 }).catch(() => null),
+        page.waitForSelector('[id*="tracking"]', { timeout: 10000 }).catch(() => null),
+        page.waitForSelector('[data-testid*="tracking"]', { timeout: 10000 }).catch(() => null),
+        page.waitForSelector('div[class*="event"]', { timeout: 10000 }).catch(() => null),
+      ]);
+      console.log('✅ Encontrados elementos de tracking');
+    } catch (e) {
+      console.log('⚠️ No se encontraron selectores específicos, continuando de todas formas...');
+    }
     
     // Intentar hacer scroll para activar lazy loading y cargar contenido dinámico
+    console.log('📜 Haciendo scroll para cargar contenido...');
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight);
     });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
     
     // Scroll hacia arriba
     await page.evaluate(() => {
       window.scrollTo(0, 0);
     });
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
     
     // Scroll hacia abajo de nuevo lentamente
     await page.evaluate(() => {
@@ -229,25 +250,12 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       }
       window.scrollTo(0, scrollHeight);
     });
+    await page.waitForTimeout(3000);
+    
+    // Esperar un poco más para asegurar que todo esté cargado
     await page.waitForTimeout(2000);
     
-    // Esperar a que aparezcan elementos específicos de tracking (si existen)
-    try {
-      // Buscar varios selectores posibles
-      await Promise.race([
-        page.waitForSelector('[class*="tracking"]', { timeout: 5000 }),
-        page.waitForSelector('[class*="shipment"]', { timeout: 5000 }),
-        page.waitForSelector('[id*="tracking"]', { timeout: 5000 }),
-        page.waitForSelector('[class*="timeline"]', { timeout: 5000 }),
-        page.waitForSelector('[class*="history"]', { timeout: 5000 }),
-        page.waitForSelector('table', { timeout: 5000 }),
-      ]).catch(() => {
-        console.log('No se encontraron selectores específicos, continuando...');
-      });
-    } catch (e) {
-      // Si no aparecen, continuamos de todas formas
-      console.log('No se encontraron selectores específicos, continuando...');
-    }
+    console.log('✅ Página completamente cargada, extrayendo datos...');
 
     // Extraer información de la página
     const trackingData = await page.evaluate(() => {
@@ -262,46 +270,93 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       };
 
       try {
-        // Buscar el contenedor principal de tracking
-        // DHL suele usar estos selectores
-        const trackingContainer = document.querySelector('[class*="tracking"], [class*="shipment"], [id*="tracking"], [id*="shipment"]') ||
-                                 document.querySelector('main, [role="main"]') ||
-                                 document.body;
+        // Buscar el contenedor principal de tracking - más específico para DHL
+        let trackingContainer = null;
+        
+        // Intentar selectores más específicos primero
+        const specificSelectors = [
+          '[class*="tracking-result"]',
+          '[class*="tracking-details"]',
+          '[class*="shipment-details"]',
+          '[id*="trackingResult"]',
+          '[id*="tracking-result"]',
+          '[data-testid*="tracking"]',
+          'main[class*="tracking"]',
+          'div[class*="tracking-container"]',
+        ];
+        
+        for (const selector of specificSelectors) {
+          trackingContainer = document.querySelector(selector);
+          if (trackingContainer) break;
+        }
+        
+        // Si no encontramos uno específico, buscar más genéricos
+        if (!trackingContainer) {
+          trackingContainer = document.querySelector('[class*="tracking"], [class*="shipment"], [id*="tracking"], [id*="shipment"]') ||
+                             document.querySelector('main, [role="main"]') ||
+                             document.body;
+        }
+        
+        // Debug: contar elementos encontrados
+        const tables = trackingContainer.querySelectorAll('table');
+        const divs = trackingContainer.querySelectorAll('div[class*="event"], div[class*="tracking"], div[class*="shipment"]');
+        data.debug = {
+          tablesFound: tables.length,
+          divsFound: divs.length,
+        };
 
-        // Buscar estado en elementos específicos de tracking
+        // Buscar estado en elementos específicos de tracking - más selectores de DHL
         const statusSelectors = [
           '[class*="status"]',
           '[class*="state"]',
+          '[class*="shipment-status"]',
+          '[class*="tracking-status"]',
           '[data-status]',
-          'h1, h2, h3',
+          'h1, h2, h3, h4',
           '.shipment-status',
           '.tracking-status',
+          '[class*="alert"]',
+          '[class*="badge"]',
+          'strong',
+          'span[class*="status"]',
         ];
 
         let statusFound = false;
         for (const selector of statusSelectors) {
           const elements = trackingContainer.querySelectorAll(selector);
           for (const elem of elements) {
-            const text = elem.textContent.trim().toLowerCase();
-            // Filtrar elementos que son claramente del menú
-            if (text.includes('menú') || text.includes('menu') || 
-                text.includes('servicio') || text.includes('encontrar') ||
-                text.length < 5 || text.length > 100) {
+            const text = elem.textContent.trim();
+            const textLower = text.toLowerCase();
+            
+            // Filtrar elementos que son claramente del menú o no relevantes
+            if (textLower.includes('menú') || textLower.includes('menu') || 
+                textLower.includes('servicio') || textLower.includes('encontrar') ||
+                textLower.includes('cookie') || textLower.includes('privacidad') ||
+                text.length < 3 || text.length > 150) {
               continue;
             }
             
-            if (text.includes('entregado') || text.includes('delivered') || text.includes('delivery completed')) {
+            // Buscar estados más específicos
+            if (textLower.includes('entregado') || textLower.includes('delivered') || 
+                textLower.includes('delivery completed') || textLower.includes('entregada')) {
               data.status = 'Entregado';
               statusFound = true;
               break;
-            } else if (text.includes('en tránsito') || text.includes('in transit') || text.includes('transit')) {
+            } else if (textLower.includes('en tránsito') || textLower.includes('in transit') || 
+                      textLower.includes('transit') || textLower.includes('transito')) {
               data.status = 'En tránsito';
               statusFound = true;
-            } else if (text.includes('recolectado') || text.includes('picked up') || text.includes('collected')) {
+            } else if (textLower.includes('recolectado') || textLower.includes('picked up') || 
+                      textLower.includes('collected') || textLower.includes('pickup')) {
               data.status = 'Recolectado';
               statusFound = true;
-            } else if (text.includes('en camino') || text.includes('on the way')) {
+            } else if (textLower.includes('en camino') || textLower.includes('on the way') ||
+                      textLower.includes('out for delivery')) {
               data.status = 'En tránsito';
+              statusFound = true;
+            } else if (textLower.includes('procesando') || textLower.includes('processing') ||
+                      textLower.includes('preparando')) {
+              data.status = 'Procesando';
               statusFound = true;
             }
           }
@@ -665,7 +720,17 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     
     trackingData.trackingNumber = trackingNumber;
 
-    console.log(`✅ Tracking encontrado: ${trackingData.status}`);
+    // Log de información de debug si está disponible
+    if (trackingData.debug) {
+      console.log(`🔍 Debug: ${trackingData.debug.tablesFound} tablas, ${trackingData.debug.divsFound} divs encontrados`);
+    }
+    
+    console.log(`✅ Tracking procesado: Estado = ${trackingData.status}, Eventos = ${trackingData.events.length}`);
+    
+    // Remover debug antes de enviar respuesta
+    if (trackingData.debug) {
+      delete trackingData.debug;
+    }
 
     // Cerrar navegador
     await browser.close();
