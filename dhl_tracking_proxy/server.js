@@ -374,6 +374,10 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
                       textLower.includes('preparando')) {
               data.status = 'Procesando';
               statusFound = true;
+            } else if (textLower.includes('lo sentimos') || textLower.includes('no se pudo') ||
+                      textLower.includes('no encontrado') || textLower.includes('no encontramos')) {
+              data.status = 'No encontrado';
+              statusFound = true;
             }
           }
           if (statusFound) break;
@@ -629,6 +633,100 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       // Intentar extraer de cualquier tabla o lista visible
       const aggressiveData = await page.evaluate(() => {
         const events = [];
+        const errorMessages = [];
+        
+        // Primero, buscar mensajes de error de DHL
+        const allText = document.body.innerText;
+        const errorPatterns = [
+          /lo sentimos[^.]*\./i,
+          /no se pudo[^.]*\./i,
+          /error[^.]*\./i,
+          /intento[^.]*\./i,
+          /no encontrado[^.]*\./i,
+          /no encontramos[^.]*\./i,
+        ];
+        
+        for (const pattern of errorPatterns) {
+          const match = allText.match(pattern);
+          if (match) {
+            errorMessages.push(match[0].trim());
+          }
+        }
+        
+        // Buscar en todas las listas (ul, ol) - hay 31 listas según los logs
+        const lists = document.querySelectorAll('ul, ol');
+        lists.forEach((list) => {
+          const items = list.querySelectorAll('li');
+          items.forEach((item) => {
+            const text = item.textContent.trim();
+            const textLower = text.toLowerCase();
+            
+            // Verificar si es un mensaje de error
+            if (textLower.includes('lo sentimos') || 
+                textLower.includes('no se pudo') ||
+                textLower.includes('error') ||
+                textLower.includes('no encontrado') ||
+                textLower.includes('no encontramos')) {
+              if (!errorMessages.some(e => e.includes(text))) {
+                errorMessages.push(text);
+              }
+            }
+            
+            // Verificar si parece un evento de tracking (más flexible)
+            if (text.length > 10 && text.length < 500 &&
+                (textLower.includes('entregado') || 
+                 textLower.includes('delivered') ||
+                 textLower.includes('tránsito') ||
+                 textLower.includes('transit') ||
+                 textLower.includes('recolectado') ||
+                 textLower.includes('picked') ||
+                 textLower.includes('enviado') ||
+                 textLower.includes('shipped') ||
+                 textLower.includes('procesado') ||
+                 textLower.includes('processed') ||
+                 textLower.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/) ||
+                 textLower.match(/\d{1,2}:\d{2}/))) {
+              
+              // Extraer fecha y hora
+              const dateMatch = text.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
+              const timeMatch = text.match(/(\d{1,2}:\d{2}(?:\s*[AP]M)?)/i);
+              
+              let timestamp = new Date().toISOString();
+              if (dateMatch) {
+                try {
+                  const parts = dateMatch[1].split(/[\/\-]/);
+                  if (parts.length === 3) {
+                    const day = parseInt(parts[0]);
+                    const month = parseInt(parts[1]) - 1;
+                    const year = parts[2].length === 2 ? 2000 + parseInt(parts[2]) : parseInt(parts[2]);
+                    let hour = 0, minute = 0;
+                    if (timeMatch) {
+                      const timeParts = timeMatch[1].match(/(\d{1,2}):(\d{2})/);
+                      if (timeParts) {
+                        hour = parseInt(timeParts[1]);
+                        minute = parseInt(timeParts[2]);
+                        if (timeMatch[1].toUpperCase().includes('PM') && hour < 12) hour += 12;
+                        if (timeMatch[1].toUpperCase().includes('AM') && hour === 12) hour = 0;
+                      }
+                    }
+                    timestamp = new Date(year, month, day, hour, minute).toISOString();
+                  }
+                } catch (e) {
+                  // Usar timestamp actual
+                }
+              }
+              
+              events.push({
+                description: text,
+                timestamp: timestamp,
+                location: null,
+                status: textLower.includes('entregado') || textLower.includes('delivered') ? 'Entregado' : 
+                       textLower.includes('tránsito') || textLower.includes('transit') ? 'En tránsito' : 
+                       textLower.includes('recolectado') || textLower.includes('picked') ? 'Recolectado' : 'Desconocido',
+              });
+            }
+          });
+        });
         
         // Buscar en todas las tablas
         const tables = document.querySelectorAll('table');
