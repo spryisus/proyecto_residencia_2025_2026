@@ -48,28 +48,33 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     console.log(`🔍 Consultando tracking: ${trackingNumber}`);
     
     // Iniciar navegador headless
-    // Render ya tiene Chrome instalado, usamos el del sistema si está disponible
-    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || 
-                          (process.env.RENDER ? '/usr/bin/google-chrome-stable' : undefined);
-    
+    // Usar el Chrome que viene con Puppeteer (se descarga durante npm install)
     const launchOptions = {
-      headless: true, // Cambiar a false para ver el navegador
+      headless: 'new', // Usar el nuevo modo headless (más estable)
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process',
         '--single-process', // Para entornos con poca memoria como Render
       ],
     };
     
-    // Usar Chrome del sistema si está disponible (Render)
-    if (executablePath) {
-      launchOptions.executablePath = executablePath;
+    // Si hay una ruta específica en variables de entorno, usarla
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+      console.log(`📍 Usando Chrome en: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
+    } else {
+      console.log('📍 Usando Chrome de Puppeteer (bundled)');
     }
     
+    console.log('🚀 Iniciando Puppeteer...');
     browser = await puppeteer.launch(launchOptions);
+    console.log('✅ Puppeteer iniciado correctamente');
 
     const page = await browser.newPage();
     
@@ -560,16 +565,26 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error:', error.message);
+    // Log del error completo para debugging
+    console.error('❌ Error al consultar tracking:', error);
+    console.error('❌ Error message:', error.message);
+    console.error('❌ Error stack:', error.stack);
     
+    // Cerrar browser si está abierto
     if (browser) {
-      await browser.close();
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error('❌ Error al cerrar browser:', closeError);
+      }
     }
-
+    
+    // Enviar respuesta de error con detalles
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: error.message || 'Error desconocido',
       message: 'Error al consultar DHL. Por favor intenta nuevamente.',
+      details: process.env.NODE_ENV === 'production' ? undefined : error.stack,
     });
   }
 });
