@@ -331,26 +331,58 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
       console.log('⚠️ No se pudo visitar la página principal, continuando...');
     }
 
+    // ESTRATEGIA MEJORADA: Navegar como un usuario real
+    // En lugar de ir directo al tracking, simular que el usuario navega desde la página principal
+    
+    console.log('🔍 Buscando enlace de tracking en la página principal...');
+    
+    // Intentar encontrar y hacer clic en el enlace de tracking (más humano)
+    try {
+      // Buscar el campo de tracking o enlace
+      const trackingLink = await page.evaluate(() => {
+        // Buscar enlaces que contengan "tracking" o "rastrear"
+        const links = Array.from(document.querySelectorAll('a'));
+        return links.find(link => {
+          const text = link.textContent.toLowerCase();
+          const href = link.href.toLowerCase();
+          return (text.includes('tracking') || text.includes('rastrear') || 
+                  text.includes('rastreo') || href.includes('tracking'));
+        });
+      });
+      
+      if (trackingLink) {
+        console.log('✅ Encontrado enlace de tracking, haciendo clic...');
+        await page.click('a[href*="tracking"], a:has-text("Rastrear"), a:has-text("Tracking")');
+        await page.waitForTimeout(randomDelay(2000, 4000));
+      }
+    } catch (e) {
+      console.log('⚠️ No se encontró enlace, navegando directamente...');
+    }
+    
     // Visitar página de tracking de DHL
     const trackingUrl = `https://www.dhl.com/mx-es/home/tracking/tracking.html?submit=1&tracking-id=${trackingNumber}`;
     
     console.log(`📡 Navegando a: ${trackingUrl}`);
     
-    // Ir a la página con timeout más largo
+    // Ir a la página con networkidle2 para asegurar que TODO cargue (más lento pero más seguro)
     console.log('⏳ Cargando página de DHL...');
     await page.goto(trackingUrl, {
-      waitUntil: 'domcontentloaded', // Cambiar a domcontentloaded para ser más rápido
-      timeout: 60000,
+      waitUntil: 'networkidle2', // Cambiar a networkidle2 para asegurar carga completa
+      timeout: 90000, // Aumentar timeout
     });
     
-    // Simular que el usuario está leyendo la página (delay aleatorio)
-    await page.waitForTimeout(randomDelay(2000, 4000));
+    // Simular que el usuario está leyendo la página (delay aleatorio más largo)
+    await page.waitForTimeout(randomDelay(3000, 6000));
+    
+    // Simular interacción humana: mover mouse sobre la página
+    await page.mouse.move(randomDelay(100, 500), randomDelay(100, 500), { steps: 20 });
+    await page.waitForTimeout(randomDelay(1000, 2000));
 
     console.log('⏳ Esperando a que cargue el contenido dinámico...');
-    // Esperar tiempo aleatorio para que carguen los scripts dinámicos de DHL
-    await page.waitForTimeout(randomDelay(6000, 10000));
+    // Esperar tiempo aleatorio MÁS LARGO para que carguen los scripts dinámicos de DHL
+    await page.waitForTimeout(randomDelay(10000, 15000)); // Aumentado de 6-10s a 10-15s
     
-    // Verificar si hay CAPTCHA o bloqueo
+    // Verificar si hay CAPTCHA o bloqueo ANTES de hacer scroll
     const hasCaptcha = await page.evaluate(() => {
       const bodyText = document.body.innerText.toLowerCase();
       return bodyText.includes('captcha') || 
@@ -364,6 +396,42 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
       console.log('⚠️ CAPTCHA o bloqueo detectado en la página');
       await browser.close();
       const error = new Error('DHL ha detectado actividad automatizada. Por favor, usa la opción "Abrir en navegador" para verificar manualmente.');
+      error.blocked = true;
+      error.requiresManualVerification = true;
+      throw error;
+    }
+    
+    // Verificar si hay mensaje de error de DHL ANTES de continuar (más específico)
+    const hasDHLError = await page.evaluate(() => {
+      const bodyText = document.body.innerText.toLowerCase();
+      const fullText = document.body.innerText;
+      
+      // Buscar el mensaje específico de error de DHL
+      const errorPatterns = [
+        /lo sentimos.*intento de rastreo.*no se realizó correctamente/i,
+        /lo sentimos.*su intento de rastreo/i,
+        /intento de rastreo.*no se realizó correctamente/i,
+        /no se pudo procesar.*rastreo/i,
+        /error.*rastreo/i,
+      ];
+      
+      // Verificar patrones específicos
+      const hasSpecificError = errorPatterns.some(pattern => pattern.test(fullText));
+      
+      // También verificar texto general
+      const hasGeneralError = bodyText.includes('lo sentimos') && 
+             (bodyText.includes('intento de rastreo') || 
+              bodyText.includes('no se realizó correctamente') ||
+              bodyText.includes('no se pudo procesar') ||
+              bodyText.includes('error al consultar'));
+      
+      return hasSpecificError || hasGeneralError;
+    });
+    
+    if (hasDHLError) {
+      console.log('⚠️ DHL detectó el bot y mostró mensaje de error específico');
+      await browser.close();
+      const error = new Error('DHL ha detectado actividad automatizada y bloqueó la consulta. Por favor, espera unos minutos o usa la opción "Abrir en navegador".');
       error.blocked = true;
       error.requiresManualVerification = true;
       throw error;
@@ -387,49 +455,56 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
       console.log('⚠️ No se encontraron selectores específicos, continuando de todas formas...');
     }
     
-    // Intentar hacer scroll para activar lazy loading y cargar contenido dinámico (más natural)
+    // Intentar hacer scroll para activar lazy loading y cargar contenido dinámico (más natural y lento)
     console.log('📜 Haciendo scroll para cargar contenido...');
     
-    // Scroll suave hacia abajo
-    await page.evaluate(() => {
-      window.scrollTo({
-        top: document.body.scrollHeight,
-        behavior: 'smooth'
-      });
-    });
-    await page.waitForTimeout(randomDelay(2000, 4000));
+    // Simular lectura: scroll muy lento y pausas
+    const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
+    const viewportHeight = await page.viewport().height;
+    const scrollSteps = Math.ceil(scrollHeight / (viewportHeight / 2));
     
-    // Scroll hacia arriba
+    for (let i = 0; i <= scrollSteps; i++) {
+      const scrollPosition = Math.min(i * (viewportHeight / 2), scrollHeight);
+      await page.evaluate((pos) => {
+        window.scrollTo({
+          top: pos,
+          behavior: 'smooth'
+        });
+      }, scrollPosition);
+      
+      // Pausa aleatoria entre scrolls (simula lectura)
+      await page.waitForTimeout(randomDelay(800, 1500));
+      
+      // Ocasionalmente mover el mouse (cada 3-4 scrolls)
+      if (i % 3 === 0) {
+        await page.mouse.move(
+          randomDelay(100, 800), 
+          randomDelay(100, 600), 
+          { steps: 15 }
+        );
+      }
+    }
+    
+    // Scroll hacia arriba lentamente
     await page.evaluate(() => {
       window.scrollTo({
         top: 0,
         behavior: 'smooth'
       });
     });
-    await page.waitForTimeout(randomDelay(1500, 2500));
+    await page.waitForTimeout(randomDelay(2000, 4000));
     
-    // Scroll hacia abajo de nuevo lentamente (simulando lectura)
+    // Scroll hacia abajo de nuevo (simulando que busca algo)
     await page.evaluate(() => {
-      const scrollHeight = document.body.scrollHeight;
-      const viewportHeight = window.innerHeight;
-      let currentScroll = 0;
-      const scrollInterval = setInterval(() => {
-        currentScroll += viewportHeight / 3;
-        if (currentScroll >= scrollHeight) {
-          clearInterval(scrollInterval);
-          window.scrollTo(0, scrollHeight);
-        } else {
-          window.scrollTo({
-            top: currentScroll,
-            behavior: 'smooth'
-          });
-        }
-      }, 300);
+      window.scrollTo({
+        top: document.body.scrollHeight / 2,
+        behavior: 'smooth'
+      });
     });
-    await page.waitForTimeout(randomDelay(3000, 5000));
+    await page.waitForTimeout(randomDelay(2000, 3500));
     
     // Esperar un poco más para asegurar que todo esté cargado
-    await page.waitForTimeout(randomDelay(1500, 3000));
+    await page.waitForTimeout(randomDelay(2000, 4000));
     
     console.log('✅ Página completamente cargada, extrayendo datos...');
 
@@ -847,16 +922,19 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
         const events = [];
         const errorMessages = [];
         
-        // Primero, buscar mensajes de error de DHL
-        const allText = document.body.innerText;
-        const errorPatterns = [
-          /lo sentimos[^.]*\./i,
-          /no se pudo[^.]*\./i,
-          /error[^.]*\./i,
-          /intento[^.]*\./i,
-          /no encontrado[^.]*\./i,
-          /no encontramos[^.]*\./i,
-        ];
+      // Primero, buscar mensajes de error de DHL (más específicos)
+      const allText = document.body.innerText;
+      const errorPatterns = [
+        /lo sentimos.*intento de rastreo.*no se realizó correctamente/i,
+        /lo sentimos.*su intento de rastreo/i,
+        /intento de rastreo.*no se realizó correctamente/i,
+        /lo sentimos[^.]*\./i,
+        /no se pudo[^.]*\./i,
+        /error[^.]*\./i,
+        /intento[^.]*\./i,
+        /no encontrado[^.]*\./i,
+        /no encontramos[^.]*\./i,
+      ];
         
         for (const pattern of errorPatterns) {
           const match = allText.match(pattern);
