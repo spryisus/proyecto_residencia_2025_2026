@@ -10,13 +10,13 @@ puppeteer.use(StealthPlugin());
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// User-Agents realistas y actualizados para rotación
+// User-Agents realistas y estables (Chrome 122 es más estable y menos sospechoso)
 const USER_AGENTS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
 ];
 
 // Función para obtener un User-Agent aleatorio
@@ -168,25 +168,36 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
     // Asegurar que Chrome esté disponible y obtener su ruta
     const chromePath = await ensureChrome();
     
-    // Configurar opciones de lanzamiento para Render con stealth mejorado
+    // Configurar opciones de lanzamiento para Render - MODO STEALTH TOTAL
     const launchOptions = {
-      headless: 'new', // Usar el nuevo modo headless (más estable)
+      headless: true, // Usar headless simple (más estable)
       args: [
+        // Flags esenciales para Render
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
-        '--disable-software-rasterizer',
         '--single-process', // Para entornos con poca memoria como Render
-        // Flags críticos para evitar detección
+        // Flags CRÍTICOS para evitar detección de bots
         '--disable-blink-features=AutomationControlled', // Oculta que es automatizado
+        '--disable-infobars', // Oculta la barra de "Chrome está siendo controlado"
         '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-web-security',
-        '--disable-features=VizDisplayCompositor',
-        // Hacer que parezca más un navegador real
-        '--window-size=1920,1080',
-        '--start-maximized',
+        // Hacer que parezca más un navegador real (tamaño común de ventana)
+        '--window-size=1280,800',
+        // Flags adicionales para reducir detección
+        '--disable-gpu',
+        '--disable-accelerated-2d-canvas',
+        '--disable-software-rasterizer',
+        '--disable-extensions',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-default-apps',
+        '--disable-popup-blocking',
+        '--disable-translate',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-ipc-flooding-protection',
       ],
     };
     
@@ -211,15 +222,27 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
 
     const page = await browser.newPage();
     
-    // Stealth plugin ya maneja la mayoría de anti-detección, pero agregamos refuerzos
+    // Stealth plugin ya maneja la mayoría de anti-detección, pero agregamos refuerzos EXTRA
     await page.evaluateOnNewDocument(() => {
-      // Eliminar webdriver completamente
+      // Eliminar webdriver completamente (MÚLTIPLES MÉTODOS para asegurar)
       Object.defineProperty(navigator, 'webdriver', {
         get: () => undefined,
       });
       
       // Eliminar del prototipo también
       delete navigator.__proto__.webdriver;
+      
+      // Intentar eliminar de todas las formas posibles
+      try {
+        delete navigator.webdriver;
+      } catch (e) {}
+      
+      // Sobrescribir con undefined
+      Object.defineProperty(navigator, 'webdriver', {
+        value: undefined,
+        writable: false,
+        configurable: true,
+      });
       
       // Sobrescribir plugins para parecer más real
       Object.defineProperty(navigator, 'plugins', {
@@ -289,35 +312,33 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
       );
     });
     
-    // Configurar User-Agent aleatorio y actualizado
-    const userAgent = getRandomUserAgent();
+    // Configurar User-Agent estable (Chrome 122 - menos sospechoso que versiones muy nuevas)
+    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
     await page.setUserAgent(userAgent);
     
-    // Configurar viewport para parecer más realista
+    // Configurar viewport realista (tamaño común de ventana)
     await page.setViewport({
-      width: 1920,
-      height: 1080,
+      width: 1280,
+      height: 800,
       deviceScaleFactor: 1,
     });
     
-    // Configurar headers adicionales para evitar detección de bot (actualizados)
-    const chromeVersion = userAgent.match(/Chrome\/(\d+)/)?.[1] || '131';
+    // Configurar headers REALES y consistentes (DHL los revisa agresivamente)
     await page.setExtraHTTPHeaders({
-      'Accept-Language': 'es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-      'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
-      'Cache-Control': 'max-age=0',
-      'sec-ch-ua': `"Google Chrome";v="${chromeVersion}", "Chromium";v="${chromeVersion}", "Not_A Brand";v="8"`,
+      'accept-language': 'es-MX,es;q=0.9,en;q=0.8',
+      'accept-encoding': 'gzip, deflate, br',
+      'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'connection': 'keep-alive',
+      'upgrade-insecure-requests': '1',
+      'sec-fetch-dest': 'document',
+      'sec-fetch-mode': 'navigate',
+      'sec-fetch-site': 'none',
+      'sec-fetch-user': '?1',
+      'cache-control': 'max-age=0',
+      'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
       'sec-ch-ua-mobile': '?0',
       'sec-ch-ua-platform': '"Windows"',
-      'DNT': '1',
-      'Referer': 'https://www.dhl.com/',
+      'dnt': '1',
     });
     
     // Primero visitar la página principal de DHL para establecer una sesión legítima
