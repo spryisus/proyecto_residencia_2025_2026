@@ -1,7 +1,11 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 require('dotenv').config();
+
+// Usar el plugin stealth para evitar detección de bots
+puppeteer.use(StealthPlugin());
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -164,8 +168,7 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
     // Asegurar que Chrome esté disponible y obtener su ruta
     const chromePath = await ensureChrome();
     
-    // Configurar opciones de lanzamiento para Render
-    // IMPORTANTE: Remover flags que indican que es un bot
+    // Configurar opciones de lanzamiento para Render con stealth mejorado
     const launchOptions = {
       headless: 'new', // Usar el nuevo modo headless (más estable)
       args: [
@@ -175,11 +178,15 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
         '--disable-software-rasterizer',
-        '--disable-features=IsolateOrigins,site-per-process',
         '--single-process', // Para entornos con poca memoria como Render
-        // Flags para hacer que parezca más un navegador real
+        // Flags críticos para evitar detección
         '--disable-blink-features=AutomationControlled', // Oculta que es automatizado
         '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor',
+        // Hacer que parezca más un navegador real
+        '--window-size=1920,1080',
+        '--start-maximized',
       ],
     };
     
@@ -204,20 +211,23 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
 
     const page = await browser.newPage();
     
-    // Ocultar que es un navegador automatizado (anti-detección mejorada)
+    // Stealth plugin ya maneja la mayoría de anti-detección, pero agregamos refuerzos
     await page.evaluateOnNewDocument(() => {
-      // Remover la propiedad webdriver que indica automatización
+      // Eliminar webdriver completamente
       Object.defineProperty(navigator, 'webdriver', {
         get: () => undefined,
       });
+      
+      // Eliminar del prototipo también
+      delete navigator.__proto__.webdriver;
       
       // Sobrescribir plugins para parecer más real
       Object.defineProperty(navigator, 'plugins', {
         get: () => {
           return [
-            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-            { name: 'Native Client', filename: 'internal-nacl-plugin' },
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
           ];
         },
       });
@@ -227,12 +237,47 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
         get: () => ['es-MX', 'es', 'en-US', 'en'],
       });
       
-      // Agregar chrome object completo
+      // Agregar chrome object completo y realista
       window.chrome = {
         runtime: {},
-        loadTimes: function() {},
-        csi: function() {},
-        app: {}
+        loadTimes: function() {
+          return {
+            commitLoadTime: Date.now() - Math.random() * 1000,
+            connectionInfo: 'http/1.1',
+            finishDocumentLoadTime: Date.now() - Math.random() * 500,
+            finishLoadTime: Date.now() - Math.random() * 200,
+            firstPaintAfterLoadTime: 0,
+            firstPaintTime: Date.now() - Math.random() * 1000,
+            navigationType: 'Other',
+            npnNegotiatedProtocol: 'unknown',
+            requestTime: Date.now() - Math.random() * 2000,
+            startLoadTime: Date.now() - Math.random() * 1500,
+            wasAlternateProtocolAvailable: false,
+            wasFetchedViaSpdy: false,
+            wasNpnNegotiated: false,
+          };
+        },
+        csi: function() {
+          return {
+            startE: Date.now() - Math.random() * 10000,
+            onloadT: Date.now() - Math.random() * 5000,
+            pageT: Math.random() * 1000,
+            tran: 15,
+          };
+        },
+        app: {
+          isInstalled: false,
+          InstallState: {
+            DISABLED: 'disabled',
+            INSTALLED: 'installed',
+            NOT_INSTALLED: 'not_installed',
+          },
+          RunningState: {
+            CANNOT_RUN: 'cannot_run',
+            READY_TO_RUN: 'ready_to_run',
+            RUNNING: 'running',
+          },
+        },
       };
       
       // Sobrescribir permissions
@@ -242,16 +287,6 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
           Promise.resolve({ state: Notification.permission }) :
           originalQuery(parameters)
       );
-      
-      // Ocultar automation indicators
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
-      });
-      
-      // Sobrescribir getBattery si existe
-      if (navigator.getBattery) {
-        delete navigator.getBattery;
-      }
     });
     
     // Configurar User-Agent aleatorio y actualizado
