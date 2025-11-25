@@ -203,7 +203,7 @@ class DHLTrackingService {
       // Determinar el estado basado en los eventos si el estado viene como "No encontrado" pero hay eventos
       String status = data['status'] as String? ?? 'Desconocido';
       
-      // Si el estado es "No encontrado" pero hay eventos, determinar el estado desde los eventos
+      // Si el estado es "No encontrado" pero hay eventos, verificar si son eventos válidos o mensajes de error
       if ((status.toLowerCase().contains('no encontrado') || 
            status.toLowerCase().contains('not found') ||
            status == 'Desconocido') && 
@@ -212,7 +212,15 @@ class DHLTrackingService {
         final lastEvent = events.first; // Los eventos están ordenados del más reciente al más antiguo
         final description = lastEvent.description.toLowerCase();
         
-        if (description.contains('entregado') || description.contains('delivered')) {
+        // Si el evento es un mensaje de error, mantener el estado como "No encontrado"
+        if (description.contains('lo sentimos') || 
+            description.contains('error') ||
+            description.contains('no se pudo') ||
+            description.contains('no se realizó') ||
+            description.contains('intento')) {
+          // Mantener el estado como "No encontrado" cuando es un mensaje de error
+          status = 'No encontrado';
+        } else if (description.contains('entregado') || description.contains('delivered')) {
           status = 'Entregado';
         } else if (description.contains('en tránsito') || 
                    description.contains('in transit') ||
@@ -227,7 +235,8 @@ class DHLTrackingService {
                    description.contains('scheduled')) {
           status = 'Programado';
         } else {
-          status = 'En proceso';
+          // Si no podemos determinar, mantener el estado original
+          status = status;
         }
       }
 
