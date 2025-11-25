@@ -6,6 +6,25 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// User-Agents realistas y actualizados para rotación
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
+];
+
+// Función para obtener un User-Agent aleatorio
+function getRandomUserAgent() {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+// Función para delay aleatorio (simula comportamiento humano)
+function randomDelay(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 // Habilitar CORS para que Flutter pueda hacer peticiones
 app.use(cors());
 app.use(express.json());
@@ -131,19 +150,12 @@ app.get('/', (req, res) => {
 });
 
 /**
- * Endpoint para consultar tracking de DHL
- * GET /api/track/:trackingNumber
+ * Función auxiliar para realizar el scraping de DHL
+ * @param {string} trackingNumber - Número de tracking
+ * @param {number} attempt - Número de intento (para reintentos)
+ * @returns {Promise<Object>} - Datos de tracking
  */
-app.get('/api/track/:trackingNumber', async (req, res) => {
-  const { trackingNumber } = req.params;
-  
-  if (!trackingNumber || trackingNumber.trim().length < 8) {
-    return res.status(400).json({
-      success: false,
-      error: 'Número de tracking inválido',
-    });
-  }
-
+async function scrapeDHLTracking(trackingNumber, attempt = 1) {
   let browser = null;
   
   try {
@@ -192,16 +204,22 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
 
     const page = await browser.newPage();
     
-    // Ocultar que es un navegador automatizado (anti-detección)
+    // Ocultar que es un navegador automatizado (anti-detección mejorada)
     await page.evaluateOnNewDocument(() => {
       // Remover la propiedad webdriver que indica automatización
       Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
+        get: () => undefined,
       });
       
       // Sobrescribir plugins para parecer más real
       Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5],
+        get: () => {
+          return [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin' },
+          ];
+        },
       });
       
       // Sobrescribir languages
@@ -209,16 +227,36 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
         get: () => ['es-MX', 'es', 'en-US', 'en'],
       });
       
-      // Agregar chrome object
+      // Agregar chrome object completo
       window.chrome = {
         runtime: {},
+        loadTimes: function() {},
+        csi: function() {},
+        app: {}
       };
+      
+      // Sobrescribir permissions
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission }) :
+          originalQuery(parameters)
+      );
+      
+      // Ocultar automation indicators
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => false,
+      });
+      
+      // Sobrescribir getBattery si existe
+      if (navigator.getBattery) {
+        delete navigator.getBattery;
+      }
     });
     
-    // Configurar User-Agent realista y actualizado
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
+    // Configurar User-Agent aleatorio y actualizado
+    const userAgent = getRandomUserAgent();
+    await page.setUserAgent(userAgent);
     
     // Configurar viewport para parecer más realista
     await page.setViewport({
@@ -227,11 +265,12 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       deviceScaleFactor: 1,
     });
     
-    // Configurar headers adicionales para evitar detección de bot
+    // Configurar headers adicionales para evitar detección de bot (actualizados)
+    const chromeVersion = userAgent.match(/Chrome\/(\d+)/)?.[1] || '131';
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7',
       'Accept-Encoding': 'gzip, deflate, br',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
       'Connection': 'keep-alive',
       'Upgrade-Insecure-Requests': '1',
       'Sec-Fetch-Dest': 'document',
@@ -239,10 +278,11 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       'Sec-Fetch-Site': 'none',
       'Sec-Fetch-User': '?1',
       'Cache-Control': 'max-age=0',
-      'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+      'sec-ch-ua': `"Google Chrome";v="${chromeVersion}", "Chromium";v="${chromeVersion}", "Not_A Brand";v="8"`,
       'sec-ch-ua-mobile': '?0',
       'sec-ch-ua-platform': '"Windows"',
       'DNT': '1',
+      'Referer': 'https://www.dhl.com/',
     });
     
     // Primero visitar la página principal de DHL para establecer una sesión legítima
@@ -250,24 +290,41 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     console.log('🏠 Visitando página principal de DHL para establecer sesión...');
     try {
       await page.goto('https://www.dhl.com/mx-es/home.html', {
-        waitUntil: 'networkidle2', // Esperar a que la red esté inactiva
+        waitUntil: 'domcontentloaded', // Más rápido, menos sospechoso
         timeout: 30000,
       });
       
-      // Simular comportamiento humano: mover el mouse y hacer scroll
-      await page.mouse.move(100, 100);
-      await page.waitForTimeout(1000);
+      // Simular comportamiento humano más realista con delays aleatorios
+      await page.waitForTimeout(randomDelay(1500, 3000));
       
-      await page.evaluate(() => {
-        window.scrollTo(0, 300);
-      });
-      await page.waitForTimeout(1500);
+      // Movimientos de mouse más naturales
+      const viewport = page.viewport();
+      const centerX = viewport.width / 2;
+      const centerY = viewport.height / 2;
       
-      // Volver arriba
+      // Mover mouse de forma más natural (curva)
+      await page.mouse.move(centerX - 100, centerY - 50, { steps: 10 });
+      await page.waitForTimeout(randomDelay(500, 1000));
+      await page.mouse.move(centerX, centerY, { steps: 10 });
+      await page.waitForTimeout(randomDelay(500, 1000));
+      
+      // Scroll más natural (suave)
       await page.evaluate(() => {
-        window.scrollTo(0, 0);
+        window.scrollTo({
+          top: 300,
+          behavior: 'smooth'
+        });
       });
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(randomDelay(1000, 2000));
+      
+      // Scroll hacia arriba
+      await page.evaluate(() => {
+        window.scrollTo({
+          top: 0,
+          behavior: 'smooth'
+        });
+      });
+      await page.waitForTimeout(randomDelay(800, 1500));
       
       console.log('✅ Sesión establecida correctamente');
     } catch (e) {
@@ -279,19 +336,38 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     
     console.log(`📡 Navegando a: ${trackingUrl}`);
     
-    // Ir a la página con timeout más largo y usando networkidle2 para asegurar que todo cargue
+    // Ir a la página con timeout más largo
     console.log('⏳ Cargando página de DHL...');
     await page.goto(trackingUrl, {
-      waitUntil: 'networkidle2', // Esperar a que la red esté inactiva (más realista)
+      waitUntil: 'domcontentloaded', // Cambiar a domcontentloaded para ser más rápido
       timeout: 60000,
     });
     
-    // Simular que el usuario está leyendo la página
-    await page.waitForTimeout(2000);
+    // Simular que el usuario está leyendo la página (delay aleatorio)
+    await page.waitForTimeout(randomDelay(2000, 4000));
 
     console.log('⏳ Esperando a que cargue el contenido dinámico...');
-    // Esperar más tiempo para que carguen los scripts dinámicos de DHL
-    await page.waitForTimeout(8000);
+    // Esperar tiempo aleatorio para que carguen los scripts dinámicos de DHL
+    await page.waitForTimeout(randomDelay(6000, 10000));
+    
+    // Verificar si hay CAPTCHA o bloqueo
+    const hasCaptcha = await page.evaluate(() => {
+      const bodyText = document.body.innerText.toLowerCase();
+      return bodyText.includes('captcha') || 
+             bodyText.includes('verificación') ||
+             bodyText.includes('verifica que no eres un robot') ||
+             bodyText.includes('access denied') ||
+             bodyText.includes('blocked');
+    });
+    
+    if (hasCaptcha) {
+      console.log('⚠️ CAPTCHA o bloqueo detectado en la página');
+      await browser.close();
+      const error = new Error('DHL ha detectado actividad automatizada. Por favor, usa la opción "Abrir en navegador" para verificar manualmente.');
+      error.blocked = true;
+      error.requiresManualVerification = true;
+      throw error;
+    }
     
     // Esperar específicamente por elementos comunes de DHL
     console.log('🔍 Buscando elementos de tracking...');
@@ -311,32 +387,49 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       console.log('⚠️ No se encontraron selectores específicos, continuando de todas formas...');
     }
     
-    // Intentar hacer scroll para activar lazy loading y cargar contenido dinámico
+    // Intentar hacer scroll para activar lazy loading y cargar contenido dinámico (más natural)
     console.log('📜 Haciendo scroll para cargar contenido...');
+    
+    // Scroll suave hacia abajo
     await page.evaluate(() => {
-      window.scrollTo(0, document.body.scrollHeight);
+      window.scrollTo({
+        top: document.body.scrollHeight,
+        behavior: 'smooth'
+      });
     });
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(randomDelay(2000, 4000));
     
     // Scroll hacia arriba
     await page.evaluate(() => {
-      window.scrollTo(0, 0);
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
     });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(randomDelay(1500, 2500));
     
-    // Scroll hacia abajo de nuevo lentamente
+    // Scroll hacia abajo de nuevo lentamente (simulando lectura)
     await page.evaluate(() => {
       const scrollHeight = document.body.scrollHeight;
       const viewportHeight = window.innerHeight;
-      for (let i = 0; i < scrollHeight; i += viewportHeight / 2) {
-        window.scrollTo(0, i);
-      }
-      window.scrollTo(0, scrollHeight);
+      let currentScroll = 0;
+      const scrollInterval = setInterval(() => {
+        currentScroll += viewportHeight / 3;
+        if (currentScroll >= scrollHeight) {
+          clearInterval(scrollInterval);
+          window.scrollTo(0, scrollHeight);
+        } else {
+          window.scrollTo({
+            top: currentScroll,
+            behavior: 'smooth'
+          });
+        }
+      }, 300);
     });
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(randomDelay(3000, 5000));
     
     // Esperar un poco más para asegurar que todo esté cargado
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(randomDelay(1500, 3000));
     
     console.log('✅ Página completamente cargada, extrayendo datos...');
 
@@ -689,6 +782,41 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       return data;
     });
 
+    // Verificar si DHL bloqueó la consulta antes de intentar extraer datos
+    const isBlocked = await page.evaluate(() => {
+      const bodyText = document.body.innerText.toLowerCase();
+      const url = window.location.href;
+      
+      // Detectar varios tipos de bloqueos
+      const blockedIndicators = [
+        'access denied',
+        'blocked',
+        'suspicious activity',
+        'too many requests',
+        'rate limit',
+        'forbidden',
+        'captcha',
+        'verificación',
+        'verifica que no eres un robot',
+        'lo sentimos, no podemos procesar',
+        'error al procesar',
+      ];
+      
+      return blockedIndicators.some(indicator => bodyText.includes(indicator)) ||
+             url.includes('error') ||
+             url.includes('blocked') ||
+             url.includes('captcha');
+    });
+    
+    if (isBlocked) {
+      console.log('⚠️ DHL ha bloqueado la consulta');
+      await browser.close();
+      const error = new Error('DHL ha bloqueado esta consulta. Por favor, espera unos minutos antes de intentar nuevamente o usa la opción "Abrir en navegador".');
+      error.blocked = true;
+      error.requiresManualVerification = true;
+      throw error;
+    }
+    
     // Capturar un fragmento del HTML para debugging si no encontramos eventos
     if (trackingData.events.length === 0) {
       console.log('⚠️  No se encontraron eventos, capturando HTML para análisis...');
@@ -699,6 +827,7 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
           bodyText: document.body.innerText.substring(0, 2000), // Primeros 2000 caracteres
           allText: document.body.textContent.substring(0, 1000),
           title: document.title,
+          url: window.location.href,
           hasTables: document.querySelectorAll('table').length,
           hasLists: document.querySelectorAll('ul, ol').length,
           allDivs: Array.from(document.querySelectorAll('div')).slice(0, 20).map(div => ({
@@ -708,7 +837,7 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
         };
       });
       
-      console.log(`📄 Debug HTML: Título="${pageContent.title}", Tablas=${pageContent.hasTables}, Listas=${pageContent.hasLists}`);
+      console.log(`📄 Debug HTML: Título="${pageContent.title}", URL="${pageContent.url}", Tablas=${pageContent.hasTables}, Listas=${pageContent.hasLists}`);
       console.log(`📝 Primeros caracteres del body: ${pageContent.bodyText.substring(0, 200)}`);
       
       console.log('⚠️  Intentando scraping más agresivo...');
@@ -986,16 +1115,15 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     // Cerrar navegador
     await browser.close();
 
-    res.json({
+    return {
       success: true,
       data: trackingData,
-    });
+    };
 
   } catch (error) {
     // Log del error completo para debugging
-    console.error('❌ Error al consultar tracking:', error);
+    console.error(`❌ Error al consultar tracking (intento ${attempt}):`, error);
     console.error('❌ Error message:', error.message);
-    console.error('❌ Error stack:', error.stack);
     
     // Cerrar browser si está abierto
     if (browser) {
@@ -1006,13 +1134,69 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
       }
     }
     
-    // Enviar respuesta de error con detalles
-    res.status(500).json({
+    throw error;
+  }
+}
+
+/**
+ * Endpoint para consultar tracking de DHL
+ * GET /api/track/:trackingNumber
+ */
+app.get('/api/track/:trackingNumber', async (req, res) => {
+  const { trackingNumber } = req.params;
+  
+  if (!trackingNumber || trackingNumber.trim().length < 8) {
+    return res.status(400).json({
       success: false,
-      error: error.message || 'Error desconocido',
-      message: 'Error al consultar DHL. Por favor intenta nuevamente.',
-      details: process.env.NODE_ENV === 'production' ? undefined : error.stack,
+      error: 'Número de tracking inválido',
     });
+  }
+
+  const maxRetries = 2; // Máximo 2 reintentos (3 intentos en total)
+  let lastError = null;
+  
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    try {
+      console.log(`🔄 Intento ${attempt} de ${maxRetries + 1}...`);
+      
+      // Agregar delay entre reintentos (exponencial backoff)
+      if (attempt > 1) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 2), 10000); // Max 10 segundos
+        console.log(`⏳ Esperando ${delay}ms antes del reintento...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      
+      const result = await scrapeDHLTracking(trackingNumber, attempt);
+      
+      // Si llegamos aquí, fue exitoso
+      return res.json(result);
+      
+    } catch (error) {
+      lastError = error;
+      
+      // Si es un error de bloqueo o CAPTCHA, no reintentar
+      if (error.blocked || error.requiresManualVerification) {
+        return res.status(403).json({
+          success: false,
+          error: error.error || 'DHL ha bloqueado esta consulta',
+          requiresManualVerification: true,
+          blocked: true,
+        });
+      }
+      
+      // Si es el último intento, devolver el error
+      if (attempt === maxRetries + 1) {
+        console.error('❌ Todos los intentos fallaron');
+        return res.status(500).json({
+          success: false,
+          error: lastError.message || 'Error desconocido',
+          message: 'Error al consultar DHL después de varios intentos. Por favor intenta nuevamente más tarde.',
+          details: process.env.NODE_ENV === 'production' ? undefined : lastError.stack,
+        });
+      }
+      
+      console.log(`⚠️ Intento ${attempt} falló, reintentando...`);
+    }
   }
 });
 
