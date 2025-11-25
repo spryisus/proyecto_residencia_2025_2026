@@ -655,7 +655,7 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
         
         // Buscar en todas las listas (ul, ol) - hay 31 listas según los logs
         const allLists = document.querySelectorAll('ul, ol');
-        lists.forEach((list) => {
+        allLists.forEach((list) => {
           const items = list.querySelectorAll('li');
           items.forEach((item) => {
             const text = item.textContent.trim();
