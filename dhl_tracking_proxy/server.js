@@ -153,6 +153,7 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
     const chromePath = await ensureChrome();
     
     // Configurar opciones de lanzamiento para Render
+    // IMPORTANTE: Remover flags que indican que es un bot
     const launchOptions = {
       headless: 'new', // Usar el nuevo modo headless (más estable)
       args: [
@@ -162,9 +163,11 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
         '--disable-accelerated-2d-canvas',
         '--disable-gpu',
         '--disable-software-rasterizer',
-        '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
         '--single-process', // Para entornos con poca memoria como Render
+        // Flags para hacer que parezca más un navegador real
+        '--disable-blink-features=AutomationControlled', // Oculta que es automatizado
+        '--disable-features=IsolateOrigins,site-per-process',
       ],
     };
     
@@ -189,22 +192,102 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
 
     const page = await browser.newPage();
     
-    // Configurar User-Agent realista
+    // Ocultar que es un navegador automatizado (anti-detección)
+    await page.evaluateOnNewDocument(() => {
+      // Remover la propiedad webdriver que indica automatización
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => false,
+      });
+      
+      // Sobrescribir plugins para parecer más real
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+      });
+      
+      // Sobrescribir languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['es-MX', 'es', 'en-US', 'en'],
+      });
+      
+      // Agregar chrome object
+      window.chrome = {
+        runtime: {},
+      };
+    });
+    
+    // Configurar User-Agent realista y actualizado
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
+    
+    // Configurar viewport para parecer más realista
+    await page.setViewport({
+      width: 1920,
+      height: 1080,
+      deviceScaleFactor: 1,
+    });
+    
+    // Configurar headers adicionales para evitar detección de bot
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'Cache-Control': 'max-age=0',
+      'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      'DNT': '1',
+    });
+    
+    // Primero visitar la página principal de DHL para establecer una sesión legítima
+    // Esto hace que parezca más humano y reduce las posibilidades de bloqueo
+    console.log('🏠 Visitando página principal de DHL para establecer sesión...');
+    try {
+      await page.goto('https://www.dhl.com/mx-es/home.html', {
+        waitUntil: 'networkidle2', // Esperar a que la red esté inactiva
+        timeout: 30000,
+      });
+      
+      // Simular comportamiento humano: mover el mouse y hacer scroll
+      await page.mouse.move(100, 100);
+      await page.waitForTimeout(1000);
+      
+      await page.evaluate(() => {
+        window.scrollTo(0, 300);
+      });
+      await page.waitForTimeout(1500);
+      
+      // Volver arriba
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      await page.waitForTimeout(1000);
+      
+      console.log('✅ Sesión establecida correctamente');
+    } catch (e) {
+      console.log('⚠️ No se pudo visitar la página principal, continuando...');
+    }
 
     // Visitar página de tracking de DHL
     const trackingUrl = `https://www.dhl.com/mx-es/home/tracking/tracking.html?submit=1&tracking-id=${trackingNumber}`;
     
     console.log(`📡 Navegando a: ${trackingUrl}`);
     
-    // Ir a la página con timeout más largo
+    // Ir a la página con timeout más largo y usando networkidle2 para asegurar que todo cargue
     console.log('⏳ Cargando página de DHL...');
     await page.goto(trackingUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
+      waitUntil: 'networkidle2', // Esperar a que la red esté inactiva (más realista)
+      timeout: 60000,
     });
+    
+    // Simular que el usuario está leyendo la página
+    await page.waitForTimeout(2000);
 
     console.log('⏳ Esperando a que cargue el contenido dinámico...');
     // Esperar más tiempo para que carguen los scripts dinámicos de DHL

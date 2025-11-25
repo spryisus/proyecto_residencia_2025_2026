@@ -23,8 +23,11 @@ class _TrackShipmentScreenState extends State<TrackShipmentScreen> {
     super.initState();
     // Inicializar servicio con la URL correcta según la plataforma y ambiente
     // Para usar producción (cloud), cambiar a: useProduction: true
+    // Para usar método directo (sin proxy), cambiar a: proxyUrl: null
     _trackingService = DHLTrackingService(
-      proxyUrl: DHLProxyConfig.getProxyUrl(useProduction: false), // Cambiar a true para producción
+      // Si el proxy falla, puedes comentar la siguiente línea y descomentar la de abajo para usar método directo
+      proxyUrl: DHLProxyConfig.getProxyUrl(useProduction: true), // ✅ Usando producción
+      // proxyUrl: null, // Usar método directo si el proxy no funciona
     );
   }
   bool _isSearching = false;
