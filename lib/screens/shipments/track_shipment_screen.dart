@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/services/dhl_tracking_service.dart';
 import '../../domain/entities/tracking_event.dart';
-import '../../widgets/tracking_timeline_widget.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/config/dhl_proxy_config.dart';
 import 'package:intl/intl.dart';
@@ -295,18 +294,28 @@ class _TrackShipmentScreenState extends State<TrackShipmentScreen> {
   }
 
   Widget _buildLoadingState() {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(),
-          SizedBox(height: 16),
-          Text(
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          const Text(
             'Consultando información de DHL...',
             style: TextStyle(
               fontSize: 16,
               color: Colors.grey,
             ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Esto puede tardar hasta 3-4 minutos\ndebido a medidas anti-detección de DHL.\nPor favor, ten paciencia...',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[600],
+              fontStyle: FontStyle.italic,
+            ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
@@ -347,7 +356,7 @@ class _TrackShipmentScreenState extends State<TrackShipmentScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'DHL puede estar bloqueando peticiones automáticas.\nUsa la opción "Abrir en navegador" para verificar directamente.',
+              'El proceso puede tardar hasta 3-4 minutos.\nSi el timeout persiste, verifica que el servidor proxy esté corriendo.\nTambién puedes usar "Abrir en navegador" para verificar directamente.',
               style: TextStyle(
                 fontSize: 12,
                 color: Colors.grey[500],
@@ -457,83 +466,128 @@ class _TrackShipmentScreenState extends State<TrackShipmentScreen> {
 
   Widget _buildShipmentDetails() {
     final tracking = _shipmentData!;
-    final dateFormat = DateFormat('dd/MM/yyyy');
+    final dateFormat = DateFormat('yyyy-MM-dd');
 
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Información principal del envío
-          Card(
-            elevation: 2,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.local_shipping,
+          // Tarjeta de detalles del envío (estilo plantilla)
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Título con icono
+                Row(
+                  children: [
+                    Icon(
+                      Icons.local_shipping,
+                      color: Theme.of(context).colorScheme.primary,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Envío #${tracking.trackingNumber}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
                         color: Theme.of(context).colorScheme.primary,
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Envío #${tracking.trackingNumber}',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                      ),
-                    ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // Información del envío
+                _buildInfoRowPlantilla(
+                  'Estado:',
+                  tracking.status,
+                  _getStatusColor(tracking.status),
+                ),
+                if (tracking.origin != null)
+                  _buildInfoRowPlantilla(
+                    'Origen:',
+                    tracking.origin!,
+                    Colors.grey[800]!,
                   ),
-                  const SizedBox(height: 16),
-                  _buildInfoRow(
-                    'Estado:',
-                    tracking.status,
-                    _getStatusColor(tracking.status),
+                if (tracking.destination != null)
+                  _buildInfoRowPlantilla(
+                    'Destino:',
+                    tracking.destination!,
+                    Colors.grey[800]!,
                   ),
-                  if (tracking.origin != null)
-                    _buildInfoRow(
-                      'Origen:',
-                      tracking.origin!,
-                      Colors.grey[700]!,
-                    ),
-                  if (tracking.destination != null)
-                    _buildInfoRow(
-                      'Destino:',
-                      tracking.destination!,
-                      Colors.grey[700]!,
-                    ),
-                  if (tracking.currentLocation != null)
-                    _buildInfoRow(
-                      'Ubicación actual:',
-                      tracking.currentLocation!,
-                      AppTheme.warningOrange,
-                    ),
-                  if (tracking.estimatedDelivery != null)
-                    _buildInfoRow(
-                      'Entrega estimada:',
-                      dateFormat.format(tracking.estimatedDelivery!),
-                      AppTheme.successGreen,
-                    ),
-                ],
-              ),
+                if (tracking.estimatedDelivery != null)
+                  _buildInfoRowPlantilla(
+                    'Entrega estimada:',
+                    dateFormat.format(tracking.estimatedDelivery!),
+                    AppTheme.successGreen,
+                  ),
+                if (tracking.currentLocation != null)
+                  _buildInfoRowPlantilla(
+                    'Ubicación actual:',
+                    tracking.currentLocation!,
+                    AppTheme.warningOrange,
+                  ),
+              ],
             ),
           ),
-          const SizedBox(height: 24),
-          // Historial del envío con timeline
-          Text(
-            'Historial de Seguimiento',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold,
+          const SizedBox(height: 20),
+          // Tarjeta de historial (estilo DHL)
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  spreadRadius: 1,
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
                 ),
-          ),
-          const SizedBox(height: 16),
-          TrackingTimelineWidget(
-            events: tracking.events,
-            currentStatus: tracking.status,
+              ],
+            ),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Título estilo DHL
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Todas las actualizaciones de Envío',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    Icon(
+                      Icons.keyboard_arrow_up,
+                      color: Colors.red[700],
+                      size: 20,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                // Timeline estilo DHL
+                if (tracking.events.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text(
+                      'No hay eventos disponibles',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 14,
+                      ),
+                    ),
+                  )
+                else
+                  _buildDHLTimeline(tracking.events, tracking.trackingNumber),
+              ],
+            ),
           ),
         ],
       ),
@@ -545,7 +599,7 @@ class _TrackShipmentScreenState extends State<TrackShipmentScreen> {
     if (statusLower.contains('entregado') || statusLower.contains('delivered')) {
       return AppTheme.successGreen;
     } else if (statusLower.contains('en tránsito') || statusLower.contains('in transit')) {
-      return AppTheme.warningOrange;
+      return AppTheme.primaryBlue; // Azul como en la plantilla
     } else if (statusLower.contains('recolectado') || statusLower.contains('picked up')) {
       return AppTheme.infoBlue;
     } else {
@@ -553,19 +607,20 @@ class _TrackShipmentScreenState extends State<TrackShipmentScreen> {
     }
   }
 
-  Widget _buildInfoRow(String label, String value, Color color) {
+  Widget _buildInfoRowPlantilla(String label, String value, Color color) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 130,
+            width: 140,
             child: Text(
               label,
               style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurface,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey[800],
+                fontSize: 14,
               ),
             ),
           ),
@@ -575,6 +630,170 @@ class _TrackShipmentScreenState extends State<TrackShipmentScreen> {
               style: TextStyle(
                 color: color,
                 fontWeight: FontWeight.w500,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDHLTimeline(List<TrackingEvent> events, String trackingNumber) {
+    // Agrupar eventos por fecha
+    final Map<String, List<TrackingEvent>> eventsByDate = {};
+    final dateFormat = DateFormat('EEEE d \'de\' MMMM \'de\' yyyy', 'es_ES');
+    
+    for (final event in events) {
+      final dateKey = DateFormat('yyyy-MM-dd').format(event.timestamp);
+      eventsByDate.putIfAbsent(dateKey, () => []).add(event);
+    }
+    
+    // Ordenar fechas de más reciente a más antigua
+    final sortedDates = eventsByDate.keys.toList()..sort((a, b) => b.compareTo(a));
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: sortedDates.map((dateKey) {
+        final dateEvents = eventsByDate[dateKey]!;
+        final firstEvent = dateEvents.first;
+        final displayDate = dateFormat.format(firstEvent.timestamp);
+        
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Encabezado de fecha
+            Padding(
+              padding: EdgeInsets.only(
+                bottom: 16, 
+                top: sortedDates.indexOf(dateKey) > 0 ? 24 : 0,
+              ),
+              child: Text(
+                displayDate,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.black87,
+                ),
+              ),
+            ),
+            // Eventos de esta fecha
+            ...dateEvents.asMap().entries.map((entry) {
+              final index = entry.key;
+              final event = entry.value;
+              final isLast = index == dateEvents.length - 1;
+              final isFirst = index == 0;
+              
+              return _buildDHLEventItem(event, trackingNumber, isLast, isFirst);
+            }),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildDHLEventItem(TrackingEvent event, String trackingNumber, bool isLast, bool isFirst) {
+    final timeFormat = DateFormat('h:mm a', 'es_ES');
+    final isDelivered = event.description.toLowerCase().contains('entregado') || 
+                       event.description.toLowerCase().contains('delivered');
+    
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Columna de tiempo (izquierda)
+          SizedBox(
+            width: 120,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '${timeFormat.format(event.timestamp)} (UTC-06:00)',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[700],
+                ),
+              ),
+            ),
+          ),
+          // Columna del timeline (centro)
+          SizedBox(
+            width: 40,
+            child: Column(
+              children: [
+                // Icono del evento
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: isDelivered ? AppTheme.successGreen : Colors.grey[300],
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isDelivered ? AppTheme.successGreen : Colors.grey[400]!,
+                      width: 2,
+                    ),
+                  ),
+                  child: isDelivered
+                      ? const Icon(
+                          Icons.check,
+                          size: 14,
+                          color: Colors.white,
+                        )
+                      : Icon(
+                          Icons.arrow_upward,
+                          size: 12,
+                          color: Colors.grey[600],
+                        ),
+                ),
+                // Línea vertical
+                if (!isLast)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      color: Colors.grey[300],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          // Columna de contenido (derecha)
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: isLast ? 0 : 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Descripción del evento (en negrita)
+                  Text(
+                    event.description,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  // Ubicación
+                  if (event.location != null && event.location!.isNotEmpty)
+                    Text(
+                      event.location!,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[800],
+                      ),
+                    ),
+                  if (event.location != null && event.location!.isNotEmpty)
+                    const SizedBox(height: 4),
+                  // Información de pieza con número de tracking
+                  Text(
+                    '1 Pieza: $trackingNumber',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

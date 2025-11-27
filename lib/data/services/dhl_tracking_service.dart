@@ -110,10 +110,12 @@ class DHLTrackingService {
       final url = Uri.parse('$proxyUrlClean/api/track/$trackingNumber');
 
       // Realizar petición al proxy
+      // Timeout aumentado a 300 segundos (5 minutos) debido a los delays anti-detección
+      // El proxy tiene delays de 70-80s + otros delays que pueden sumar hasta 3-4 minutos
       final response = await http.get(url).timeout(
-        const Duration(seconds: 45), // Puppeteer puede tardar más
+        const Duration(seconds: 300), // 5 minutos para dar tiempo completo a los delays anti-detección
         onTimeout: () {
-          throw Exception('Timeout: El servidor proxy está tardando mucho en responder. Verifica que el servidor esté corriendo.');
+          throw Exception('Timeout: El servidor proxy está tardando mucho en responder. El proceso puede tardar hasta 3-4 minutos debido a medidas anti-detección. Verifica que el servidor esté corriendo.');
         },
       );
 

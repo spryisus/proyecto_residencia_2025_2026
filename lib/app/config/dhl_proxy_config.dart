@@ -20,7 +20,8 @@ class DHLProxyConfig {
   static const String productionUrl = 'https://dhl-tracking-proxy.onrender.com';
   
   /// URL local para desarrollo (IP de tu computadora en la red local)
-  static const String localUrl = 'http://192.168.1.178:3000';
+  /// NOTA: Actualiza esta IP si cambias de red
+    static const String localUrl = 'http://10.12.18.188:3000';
   
   /// URL para emulador Android
   static const String androidEmulatorUrl = 'http://10.0.2.2:3000';
