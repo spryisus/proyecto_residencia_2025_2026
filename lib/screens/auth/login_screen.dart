@@ -14,6 +14,9 @@ import '../inventory/jumper_categories_screen.dart' show JumperCategories, Jumpe
 import '../shipments/shipments_screen.dart';
 import '../admin/admin_dashboard.dart';
 import '../settings/settings_screen.dart';
+import '../../widgets/clock_widget.dart';
+import '../../widgets/calendar_widget.dart';
+import '../../widgets/quick_stats_widget.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -356,6 +359,7 @@ class _WelcomePageState extends State<WelcomePage> {
   final InventarioRepository _inventarioRepository = serviceLocator.get<InventarioRepository>();
   List<InventorySession> _sessions = [];
   bool _isLoadingSessions = true;
+  List<InventorySession> _allSessions = [];
 
   @override
   void initState() {
@@ -371,6 +375,7 @@ class _WelcomePageState extends State<WelcomePage> {
     });
     
     final sessions = await _sessionStorage.getAllSessions();
+    _allSessions = sessions;
     
     // Verificar si el usuario es admin
     final isAdmin = await _checkIsAdmin();
@@ -692,57 +697,92 @@ class _WelcomePageState extends State<WelcomePage> {
           ],
         ),
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text(
-                'BIENVENIDO AL SISTEMA DE LARGA DISTANCIA',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).primaryColor,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWideScreen = constraints.maxWidth > 800;
+          
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'BIENVENIDO AL SISTEMA DE LARGA DISTANCIA',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).primaryColor,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: 280,
-                height: 56,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const LoginScreen(),
+                const SizedBox(height: 24),
+                // Widgets en grid responsive
+                if (isWideScreen)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          children: [
+                            const ClockWidget(),
+                            const SizedBox(height: 16),
+                            const QuickStatsWidget(),
+                          ],
+                        ),
                       ),
-                    );
-                  },
-                  icon: const Icon(Icons.logout, size: 24),
-                  label: Text(
-                    'Volver al login',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        flex: 3,
+                        child: const CalendarWidget(),
+                      ),
+                    ],
+                  )
+                else
+                  Column(
+                    children: [
+                      const ClockWidget(),
+                      const SizedBox(height: 16),
+                      const CalendarWidget(),
+                      const SizedBox(height: 16),
+                      const QuickStatsWidget(),
+                    ],
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).primaryColor,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: 280,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const LoginScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.logout, size: 24),
+                    label: Text(
+                      'Volver al login',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
                     ),
-                    elevation: 4,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).primaryColor,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 4,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 24),
-              _buildSessionSection(),
-            ],
-          ),
-        ),
+                const SizedBox(height: 24),
+                _buildSessionSection(),
+              ],
+            ),
+          );
+        },
       ),
     );
   }

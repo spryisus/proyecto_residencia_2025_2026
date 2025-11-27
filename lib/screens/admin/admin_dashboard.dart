@@ -7,6 +7,10 @@ import 'reports_screen.dart';
 import '../auth/login_screen.dart';
 import '../inventory/inventory_screen.dart';
 import '../shipments/shipments_screen.dart';
+import '../../widgets/clock_widget.dart';
+import '../../widgets/calendar_widget.dart';
+import '../../widgets/quick_stats_widget.dart';
+import 'users_management_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   final String? username;
@@ -19,6 +23,7 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard> {
   final InventorySessionStorage _sessionStorage = serviceLocator.get<InventorySessionStorage>();
   List<InventorySession> _sessions = [];
+  List<InventorySession> _allSessions = [];
   bool _isLoadingSessions = true;
 
   @override
@@ -29,6 +34,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Future<void> _loadSessions() async {
     final sessions = await _sessionStorage.getAllSessions();
+    _allSessions = sessions;
     // Filtrar solo inventarios pendientes
     final pendingSessions = sessions.where((s) => s.status == InventorySessionStatus.pending).toList();
     if (!mounted) return;
@@ -170,7 +176,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ListTile(
               leading: const Icon(Icons.group_add_outlined, size: 24),
               title: Text(
-                'Crear usuarios',
+                'Gestión de usuarios',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               minVerticalPadding: 16,
@@ -178,7 +184,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const CreateUsersPage()),
+                  MaterialPageRoute(builder: (_) => const UsersManagementScreen()),
                 );
               },
             ),
@@ -233,20 +239,67 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Dashboard de Administrador',
-              style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                fontWeight: FontWeight.bold,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Dashboard de Administrador',
+                style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            _buildSessionSection(),
-            const SizedBox(height: 16),
-            Expanded(
-              child: LayoutBuilder(
+              const SizedBox(height: 16),
+              // Widgets en grid responsive
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWideScreen = constraints.maxWidth > 900;
+                  
+                  if (isWideScreen) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: Column(
+                            children: [
+                              const ClockWidget(),
+                              const SizedBox(height: 16),
+                              const QuickStatsWidget(),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          flex: 3,
+                          child: const CalendarWidget(),
+                        ),
+                      ],
+                    );
+                  } else {
+                    return Column(
+                      children: [
+                        const ClockWidget(),
+                        const SizedBox(height: 16),
+                        const CalendarWidget(),
+                        const SizedBox(height: 16),
+                        const QuickStatsWidget(),
+                      ],
+                    );
+                  }
+                },
+              ),
+              const SizedBox(height: 24),
+              _buildSessionSection(),
+              const SizedBox(height: 24),
+              Text(
+                'Accesos Rápidos',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              LayoutBuilder(
                 builder: (context, constraints) {
                   // Responsive: Ajustar columnas según el tamaño de pantalla
                   int crossAxisCount = 2;
@@ -267,6 +320,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   }
                   
                   return GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
                     crossAxisCount: crossAxisCount,
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
@@ -320,7 +375,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const CreateUsersPage()),
+                        MaterialPageRoute(builder: (_) => const UsersManagementScreen()),
                       );
                     },
                     ),
@@ -328,8 +383,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 );
                 },
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -510,37 +565,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 }
 
-class CreateUsersPage extends StatelessWidget {
-  const CreateUsersPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Crear usuarios'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const SettingsScreen(),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-      body: Center(
-        child: Text(
-          'Pantalla para crear usuarios (pendiente)',
-          style: Theme.of(context).textTheme.bodyLarge,
-        ),
-      ),
-    );
-  }
-}
 
 class _SessionDetailDialog extends StatelessWidget {
   final InventorySession session;

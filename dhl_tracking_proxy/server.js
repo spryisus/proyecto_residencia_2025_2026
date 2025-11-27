@@ -29,6 +29,49 @@ function randomDelay(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// Sistema de cookies persistentes para mantener sesiones
+const fs = require('fs');
+const path = require('path');
+const COOKIES_FILE = path.join(__dirname, '.dhl-cookies.json');
+
+function loadCookies() {
+  try {
+    if (fs.existsSync(COOKIES_FILE)) {
+      const data = fs.readFileSync(COOKIES_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    console.log('⚠️ No se pudieron cargar cookies guardadas');
+  }
+  return [];
+}
+
+function saveCookies(cookies) {
+  try {
+    fs.writeFileSync(COOKIES_FILE, JSON.stringify(cookies, null, 2));
+  } catch (e) {
+    console.log('⚠️ No se pudieron guardar cookies');
+  }
+}
+
+// Sistema de rate limiting más agresivo
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL = 45000; // 45 segundos mínimo entre requests (aumentado para evitar detección)
+
+function canMakeRequest() {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+    const waitTime = MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+    console.log(`⏳ Rate limiting: esperando ${Math.ceil(waitTime / 1000)} segundos...`);
+    return false;
+  }
+  
+  lastRequestTime = now;
+  return true;
+}
+
 // Habilitar CORS para que Flutter pueda hacer peticiones
 app.use(cors());
 app.use(express.json());
@@ -163,7 +206,13 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
   let browser = null;
   
   try {
-    console.log(`🔍 Consultando tracking: ${trackingNumber}`);
+    console.log(`🔍 Consultando tracking: ${trackingNumber} (Intento ${attempt} de 3)`);
+    
+    // Rate limiting: esperar si es necesario
+    if (!canMakeRequest() && attempt === 1) {
+      const waitTime = MIN_REQUEST_INTERVAL;
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
     
     // Asegurar que Chrome esté disponible y obtener su ruta
     const chromePath = await ensureChrome();
@@ -221,6 +270,17 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
     console.log('✅ Puppeteer iniciado correctamente');
 
     const page = await browser.newPage();
+    
+    // Cargar cookies guardadas para mantener sesión
+    const savedCookies = loadCookies();
+    if (savedCookies.length > 0) {
+      try {
+        await page.setCookie(...savedCookies);
+        console.log(`🍪 Cargadas ${savedCookies.length} cookies guardadas`);
+      } catch (e) {
+        console.log('⚠️ No se pudieron cargar cookies guardadas');
+      }
+    }
     
     // Stealth plugin ya maneja la mayoría de anti-detección, pero agregamos refuerzos EXTRA
     await page.evaluateOnNewDocument(() => {
@@ -347,11 +407,11 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
     try {
       await page.goto('https://www.dhl.com/mx-es/home.html', {
         waitUntil: 'domcontentloaded', // Más rápido, menos sospechoso
-        timeout: 30000,
+        timeout: 45000, // Aumentado
       });
       
-      // Simular comportamiento humano más realista con delays aleatorios
-      await page.waitForTimeout(randomDelay(1500, 3000));
+      // Simular comportamiento humano más realista con delays aleatorios MÁS LARGOS
+      await page.waitForTimeout(randomDelay(3000, 6000)); // Aumentado de 1.5-3s a 3-6s
       
       // Movimientos de mouse más naturales
       const viewport = page.viewport();
@@ -424,19 +484,21 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
     console.log('⏳ Cargando página de DHL...');
     await page.goto(trackingUrl, {
       waitUntil: 'networkidle2', // Cambiar a networkidle2 para asegurar carga completa
-      timeout: 90000, // Aumentar timeout
+      timeout: 120000, // Aumentado a 2 minutos
     });
     
-    // Simular que el usuario está leyendo la página (delay aleatorio más largo)
-    await page.waitForTimeout(randomDelay(3000, 6000));
+    // Simular que el usuario está leyendo la página (delay aleatorio MÁS LARGO)
+    await page.waitForTimeout(randomDelay(5000, 10000)); // Aumentado de 3-6s a 5-10s
     
-    // Simular interacción humana: mover mouse sobre la página
-    await page.mouse.move(randomDelay(100, 500), randomDelay(100, 500), { steps: 20 });
-    await page.waitForTimeout(randomDelay(1000, 2000));
+    // Simular interacción humana: mover mouse sobre la página (múltiples movimientos)
+    for (let i = 0; i < 3; i++) {
+      await page.mouse.move(randomDelay(100, 800), randomDelay(100, 600), { steps: 25 });
+      await page.waitForTimeout(randomDelay(1500, 3000));
+    }
 
     console.log('⏳ Esperando a que cargue el contenido dinámico...');
-    // Esperar tiempo aleatorio MÁS LARGO para que carguen los scripts dinámicos de DHL
-    await page.waitForTimeout(randomDelay(10000, 15000)); // Aumentado de 6-10s a 10-15s
+    // Esperar tiempo aleatorio MUCHO MÁS LARGO para que carguen los scripts dinámicos de DHL
+    await page.waitForTimeout(randomDelay(15000, 25000)); // Aumentado de 10-15s a 15-25s
     
     // Verificar si hay CAPTCHA o bloqueo ANTES de hacer scroll
     const hasCaptcha = await page.evaluate(() => {
@@ -548,7 +610,7 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
         behavior: 'smooth'
       });
     });
-    await page.waitForTimeout(randomDelay(2000, 4000));
+    await page.waitForTimeout(randomDelay(3000, 6000)); // Aumentado
     
     // Scroll hacia abajo de nuevo (simulando que busca algo)
     await page.evaluate(() => {
@@ -557,10 +619,10 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
         behavior: 'smooth'
       });
     });
-    await page.waitForTimeout(randomDelay(2000, 3500));
+    await page.waitForTimeout(randomDelay(3000, 5000)); // Aumentado
     
     // Esperar un poco más para asegurar que todo esté cargado
-    await page.waitForTimeout(randomDelay(2000, 4000));
+    await page.waitForTimeout(randomDelay(4000, 7000)); // Aumentado significativamente
     
     console.log('✅ Página completamente cargada, extrayendo datos...');
 
@@ -1247,6 +1309,15 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
     }
 
     // Cerrar navegador
+    // Guardar cookies antes de cerrar para mantener sesión
+    try {
+      const cookies = await page.cookies();
+      saveCookies(cookies);
+      console.log(`🍪 Guardadas ${cookies.length} cookies para la próxima sesión`);
+    } catch (e) {
+      console.log('⚠️ No se pudieron guardar cookies');
+    }
+    
     await browser.close();
 
     return {
