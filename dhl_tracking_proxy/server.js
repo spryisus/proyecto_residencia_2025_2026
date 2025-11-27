@@ -76,6 +76,13 @@ function canMakeRequest() {
 app.use(cors());
 app.use(express.json());
 
+// Variables globales para navegador y página precargada
+let preloadedBrowser = null;
+let preloadedPage = null;
+let isPreloading = false;
+let preloadPromise = null;
+const PRELOAD_TRACKING_NUMBER = '9068591556'; // Número de guía para precarga
+
 // Variable global para rastrear si Chrome ya se está descargando
 let chromeDownloading = false;
 let chromeDownloadPromise = null;
@@ -202,8 +209,158 @@ app.get('/', (req, res) => {
  * @param {number} attempt - Número de intento (para reintentos)
  * @returns {Promise<Object>} - Datos de tracking
  */
+/**
+ * Función para precargar el navegador y página de DHL
+ */
+async function preloadDHLPage() {
+  if (isPreloading && preloadPromise) {
+    return await preloadPromise;
+  }
+  
+  if (preloadedBrowser && preloadedPage) {
+    // Verificar que la página aún esté abierta
+    try {
+      await preloadedPage.evaluate(() => document.title);
+      console.log('✅ Página precargada ya está lista');
+      return { browser: preloadedBrowser, page: preloadedPage };
+    } catch (e) {
+      console.log('⚠️ Página precargada se cerró, recargando...');
+      preloadedBrowser = null;
+      preloadedPage = null;
+    }
+  }
+  
+  isPreloading = true;
+  preloadPromise = (async () => {
+    try {
+      console.log('🔄 Precargando navegador y página de DHL...');
+      
+      const chromePath = await ensureChrome();
+      
+      const launchOptions = {
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--single-process',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-infobars',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1280,800',
+          '--disable-gpu',
+          '--disable-accelerated-2d-canvas',
+          '--disable-software-rasterizer',
+          '--disable-extensions',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-default-apps',
+          '--disable-popup-blocking',
+          '--disable-translate',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-features=TranslateUI',
+          '--disable-ipc-flooding-protection',
+        ],
+      };
+      
+      if (chromePath && typeof chromePath === 'string') {
+        launchOptions.executablePath = chromePath;
+      }
+      
+      const browser = await puppeteer.launch(launchOptions);
+      const page = await browser.newPage();
+      
+      // Configurar stealth
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined,
+        });
+        delete navigator.__proto__.webdriver;
+        try { delete navigator.webdriver; } catch (e) {}
+        Object.defineProperty(navigator, 'webdriver', {
+          value: undefined,
+          writable: false,
+          configurable: true,
+        });
+      });
+      
+      const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+      await page.setUserAgent(userAgent);
+      await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
+      
+      await page.setExtraHTTPHeaders({
+        'accept-language': 'es-MX,es;q=0.9,en;q=0.8',
+        'accept-encoding': 'gzip, deflate, br',
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'connection': 'keep-alive',
+        'upgrade-insecure-requests': '1',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-site': 'none',
+        'sec-fetch-user': '?1',
+        'cache-control': 'max-age=0',
+        'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'dnt': '1',
+      });
+      
+      // Cargar cookies guardadas
+      const savedCookies = loadCookies();
+      if (savedCookies.length > 0) {
+        try {
+          await page.setCookie(...savedCookies);
+        } catch (e) {}
+      }
+      
+      // Visitar página principal para establecer sesión
+      console.log('🏠 Precargando página principal de DHL...');
+      await page.goto('https://www.dhl.com/mx-es/home.html', {
+        waitUntil: 'domcontentloaded',
+        timeout: 45000,
+      });
+      await page.waitForTimeout(randomDelay(2000, 4000));
+      
+      // Precargar página de tracking con número de ejemplo
+      const preloadUrl = `https://www.dhl.com/mx-es/home/tracking/tracking.html?submit=1&tracking-id=${PRELOAD_TRACKING_NUMBER}`;
+      console.log(`📡 Precargando página de tracking: ${PRELOAD_TRACKING_NUMBER}...`);
+      await page.goto(preloadUrl, {
+        waitUntil: 'networkidle2',
+        timeout: 180000,
+      });
+      
+      // Esperar un poco para que cargue
+      await page.waitForTimeout(randomDelay(5000, 10000));
+      
+      // Guardar cookies
+      try {
+        const cookies = await page.cookies();
+        saveCookies(cookies);
+      } catch (e) {}
+      
+      preloadedBrowser = browser;
+      preloadedPage = page;
+      isPreloading = false;
+      
+      console.log('✅ Navegador y página precargados exitosamente');
+      return { browser, page };
+    } catch (error) {
+      console.error('❌ Error al precargar:', error.message);
+      isPreloading = false;
+      preloadPromise = null;
+      throw error;
+    }
+  })();
+  
+  return await preloadPromise;
+}
+
 async function scrapeDHLTracking(trackingNumber, attempt = 1) {
   let browser = null;
+  let page = null;
+  let usePreloaded = false;
   
   try {
     console.log(`🔍 Consultando tracking: ${trackingNumber} (Intento ${attempt} de 3)`);
@@ -214,8 +371,23 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
     
-    // Asegurar que Chrome esté disponible y obtener su ruta
-    const chromePath = await ensureChrome();
+    // Intentar usar página precargada
+    try {
+      const preloaded = await preloadDHLPage();
+      if (preloaded && preloaded.browser && preloaded.page) {
+        browser = preloaded.browser;
+        page = preloaded.page;
+        usePreloaded = true;
+        console.log('✅ Usando página precargada (más rápido)');
+      }
+    } catch (e) {
+      console.log('⚠️ No se pudo usar página precargada, creando nueva sesión...');
+    }
+    
+    // Si no hay página precargada, crear nueva
+    if (!browser || !page) {
+      // Asegurar que Chrome esté disponible y obtener su ruta
+      const chromePath = await ensureChrome();
     
     // Configurar opciones de lanzamiento para Render - MODO STEALTH TOTAL
     const launchOptions = {
@@ -401,17 +573,19 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
       'dnt': '1',
     });
     
-    // Primero visitar la página principal de DHL para establecer una sesión legítima
-    // Esto hace que parezca más humano y reduce las posibilidades de bloqueo
-    console.log('🏠 Visitando página principal de DHL para establecer sesión...');
-    try {
-      await page.goto('https://www.dhl.com/mx-es/home.html', {
-        waitUntil: 'domcontentloaded', // Más rápido, menos sospechoso
-        timeout: 45000, // Aumentado
-      });
-      
-      // Simular comportamiento humano más realista con delays aleatorios MÁS LARGOS
-      await page.waitForTimeout(randomDelay(3000, 6000)); // Aumentado de 1.5-3s a 3-6s
+    // Si no estamos usando página precargada, visitar página principal
+    if (!usePreloaded) {
+      // Primero visitar la página principal de DHL para establecer una sesión legítima
+      // Esto hace que parezca más humano y reduce las posibilidades de bloqueo
+      console.log('🏠 Visitando página principal de DHL para establecer sesión...');
+      try {
+        await page.goto('https://www.dhl.com/mx-es/home.html', {
+          waitUntil: 'domcontentloaded', // Más rápido, menos sospechoso
+          timeout: 45000, // Aumentado
+        });
+        
+        // Simular comportamiento humano más realista con delays aleatorios MÁS LARGOS
+        await page.waitForTimeout(randomDelay(5000, 10000)); // Aumentado a 5-10s
       
       // Movimientos de mouse más naturales
       const viewport = page.viewport();
@@ -480,15 +654,24 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
     
     console.log(`📡 Navegando a: ${trackingUrl}`);
     
-    // Ir a la página con networkidle2 para asegurar que TODO cargue (más lento pero más seguro)
-    console.log('⏳ Cargando página de DHL...');
-    await page.goto(trackingUrl, {
-      waitUntil: 'networkidle2', // Cambiar a networkidle2 para asegurar carga completa
-      timeout: 120000, // Aumentado a 2 minutos
-    });
+    // Si estamos usando página precargada, solo navegar a la nueva URL (más rápido)
+    if (usePreloaded) {
+      console.log('⚡ Usando página precargada - solo actualizando número de tracking...');
+      await page.goto(trackingUrl, {
+        waitUntil: 'networkidle2',
+        timeout: 180000,
+      });
+    } else {
+      // Ir a la página con networkidle2 para asegurar que TODO cargue (más lento pero más seguro)
+      console.log('⏳ Cargando página de DHL...');
+      await page.goto(trackingUrl, {
+        waitUntil: 'networkidle2', // Cambiar a networkidle2 para asegurar carga completa
+        timeout: 180000, // Aumentado a 3 minutos para dar más tiempo
+      });
+    }
     
     // Simular que el usuario está leyendo la página (delay aleatorio MÁS LARGO)
-    await page.waitForTimeout(randomDelay(5000, 10000)); // Aumentado de 3-6s a 5-10s
+    await page.waitForTimeout(randomDelay(10000, 15000)); // Aumentado a 10-15s
     
     // Simular interacción humana: mover mouse sobre la página (múltiples movimientos)
     for (let i = 0; i < 3; i++) {
@@ -498,7 +681,8 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
 
     console.log('⏳ Esperando a que cargue el contenido dinámico...');
     // Esperar tiempo aleatorio MUCHO MÁS LARGO para que carguen los scripts dinámicos de DHL
-    await page.waitForTimeout(randomDelay(15000, 25000)); // Aumentado de 10-15s a 15-25s
+    // Aumentado a 1 minuto 15 segundos (75 segundos) como solicitado
+    await page.waitForTimeout(randomDelay(70000, 80000)); // 70-80 segundos (promedio 75s)
     
     // Verificar si hay CAPTCHA o bloqueo ANTES de hacer scroll
     const hasCaptcha = await page.evaluate(() => {
@@ -610,7 +794,7 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
         behavior: 'smooth'
       });
     });
-    await page.waitForTimeout(randomDelay(3000, 6000)); // Aumentado
+    await page.waitForTimeout(randomDelay(5000, 8000)); // Aumentado a 5-8s
     
     // Scroll hacia abajo de nuevo (simulando que busca algo)
     await page.evaluate(() => {
@@ -619,10 +803,10 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
         behavior: 'smooth'
       });
     });
-    await page.waitForTimeout(randomDelay(3000, 5000)); // Aumentado
+    await page.waitForTimeout(randomDelay(5000, 8000)); // Aumentado a 5-8s
     
     // Esperar un poco más para asegurar que todo esté cargado
-    await page.waitForTimeout(randomDelay(4000, 7000)); // Aumentado significativamente
+    await page.waitForTimeout(randomDelay(10000, 15000)); // Aumentado a 10-15s para asegurar carga completa
     
     console.log('✅ Página completamente cargada, extrayendo datos...');
 
@@ -1308,7 +1492,6 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
       delete trackingData.debug;
     }
 
-    // Cerrar navegador
     // Guardar cookies antes de cerrar para mantener sesión
     try {
       const cookies = await page.cookies();
@@ -1318,7 +1501,12 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
       console.log('⚠️ No se pudieron guardar cookies');
     }
     
-    await browser.close();
+    // Solo cerrar el navegador si NO estamos usando la página precargada
+    if (!usePreloaded) {
+      await browser.close();
+    } else {
+      console.log('✅ Manteniendo navegador precargado abierto para próximas consultas');
+    }
 
     return {
       success: true,
@@ -1330,13 +1518,25 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
     console.error(`❌ Error al consultar tracking (intento ${attempt}):`, error);
     console.error('❌ Error message:', error.message);
     
-    // Cerrar browser si está abierto
-    if (browser) {
+    // Cerrar browser solo si NO estamos usando la página precargada
+    if (browser && !usePreloaded) {
       try {
         await browser.close();
       } catch (closeError) {
         console.error('❌ Error al cerrar browser:', closeError);
       }
+    } else if (error.blocked || error.requiresManualVerification) {
+      // Si hay bloqueo, reiniciar página precargada
+      console.log('🔄 Reiniciando página precargada debido a bloqueo...');
+      try {
+        if (preloadedBrowser) {
+          await preloadedBrowser.close();
+        }
+      } catch (e) {}
+      preloadedBrowser = null;
+      preloadedPage = null;
+      isPreloading = false;
+      preloadPromise = null;
     }
     
     throw error;
@@ -1417,6 +1617,13 @@ app.get('/health', (req, res) => {
 ensureChrome().then(chromePath => {
   if (chromePath) {
     console.log('✅ Chrome está listo para usar');
+    // Precargar página de DHL después de que Chrome esté listo
+    console.log('🔄 Iniciando precarga de página DHL...');
+    preloadDHLPage().then(() => {
+      console.log('✅ Precarga completada - el servidor está listo para consultas rápidas');
+    }).catch(err => {
+      console.log('⚠️ Error en precarga (se creará nueva sesión cuando sea necesario):', err.message);
+    });
   } else {
     console.log('⚠️ Chrome se descargará cuando sea necesario');
   }
