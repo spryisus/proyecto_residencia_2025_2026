@@ -573,80 +573,82 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
       'dnt': '1',
     });
     
-    // Si no estamos usando página precargada, visitar página principal
-    if (!usePreloaded) {
-      // Primero visitar la página principal de DHL para establecer una sesión legítima
-      // Esto hace que parezca más humano y reduce las posibilidades de bloqueo
-      console.log('🏠 Visitando página principal de DHL para establecer sesión...');
-      try {
-        await page.goto('https://www.dhl.com/mx-es/home.html', {
-          waitUntil: 'domcontentloaded', // Más rápido, menos sospechoso
-          timeout: 45000, // Aumentado
-        });
-        
-        // Simular comportamiento humano más realista con delays aleatorios MÁS LARGOS
-        await page.waitForTimeout(randomDelay(5000, 10000)); // Aumentado a 5-10s
-      
-      // Movimientos de mouse más naturales
-      const viewport = page.viewport();
-      const centerX = viewport.width / 2;
-      const centerY = viewport.height / 2;
-      
-      // Mover mouse de forma más natural (curva)
-      await page.mouse.move(centerX - 100, centerY - 50, { steps: 10 });
-      await page.waitForTimeout(randomDelay(500, 1000));
-      await page.mouse.move(centerX, centerY, { steps: 10 });
-      await page.waitForTimeout(randomDelay(500, 1000));
-      
-      // Scroll más natural (suave)
-      await page.evaluate(() => {
-        window.scrollTo({
-          top: 300,
-          behavior: 'smooth'
-        });
-      });
-      await page.waitForTimeout(randomDelay(1000, 2000));
-      
-      // Scroll hacia arriba
-      await page.evaluate(() => {
-        window.scrollTo({
-          top: 0,
-          behavior: 'smooth'
-        });
-      });
-      await page.waitForTimeout(randomDelay(800, 1500));
-      
-      console.log('✅ Sesión establecida correctamente');
-    } catch (e) {
-      console.log('⚠️ No se pudo visitar la página principal, continuando...');
-    }
+      // Si no estamos usando página precargada, visitar página principal
+      if (!usePreloaded) {
+        // Primero visitar la página principal de DHL para establecer una sesión legítima
+        // Esto hace que parezca más humano y reduce las posibilidades de bloqueo
+        console.log('🏠 Visitando página principal de DHL para establecer sesión...');
+        try {
+          await page.goto('https://www.dhl.com/mx-es/home.html', {
+            waitUntil: 'domcontentloaded', // Más rápido, menos sospechoso
+            timeout: 45000, // Aumentado
+          });
+          
+          // Simular comportamiento humano más realista con delays aleatorios MÁS LARGOS
+          await page.waitForTimeout(randomDelay(5000, 10000)); // Aumentado a 5-10s
+          
+          // Movimientos de mouse más naturales
+          const viewport = page.viewport();
+          const centerX = viewport.width / 2;
+          const centerY = viewport.height / 2;
+          
+          // Mover mouse de forma más natural (curva)
+          await page.mouse.move(centerX - 100, centerY - 50, { steps: 10 });
+          await page.waitForTimeout(randomDelay(500, 1000));
+          await page.mouse.move(centerX, centerY, { steps: 10 });
+          await page.waitForTimeout(randomDelay(500, 1000));
+          
+          // Scroll más natural (suave)
+          await page.evaluate(() => {
+            window.scrollTo({
+              top: 300,
+              behavior: 'smooth'
+            });
+          });
+          await page.waitForTimeout(randomDelay(1000, 2000));
+          
+          // Scroll hacia arriba
+          await page.evaluate(() => {
+            window.scrollTo({
+              top: 0,
+              behavior: 'smooth'
+            });
+          });
+          await page.waitForTimeout(randomDelay(800, 1500));
+          
+          console.log('✅ Sesión establecida correctamente');
+        } catch (e) {
+          console.log('⚠️ No se pudo visitar la página principal, continuando...');
+        }
 
-    // ESTRATEGIA MEJORADA: Navegar como un usuario real
-    // En lugar de ir directo al tracking, simular que el usuario navega desde la página principal
-    
-    console.log('🔍 Buscando enlace de tracking en la página principal...');
-    
-    // Intentar encontrar y hacer clic en el enlace de tracking (más humano)
-    try {
-      // Buscar el campo de tracking o enlace
-      const trackingLink = await page.evaluate(() => {
-        // Buscar enlaces que contengan "tracking" o "rastrear"
-        const links = Array.from(document.querySelectorAll('a'));
-        return links.find(link => {
-          const text = link.textContent.toLowerCase();
-          const href = link.href.toLowerCase();
-          return (text.includes('tracking') || text.includes('rastrear') || 
-                  text.includes('rastreo') || href.includes('tracking'));
-        });
-      });
-      
-      if (trackingLink) {
-        console.log('✅ Encontrado enlace de tracking, haciendo clic...');
-        await page.click('a[href*="tracking"], a:has-text("Rastrear"), a:has-text("Tracking")');
-        await page.waitForTimeout(randomDelay(2000, 4000));
+        // ESTRATEGIA MEJORADA: Navegar como un usuario real
+        // En lugar de ir directo al tracking, simular que el usuario navega desde la página principal
+        
+        console.log('🔍 Buscando enlace de tracking en la página principal...');
+        
+        // Intentar encontrar y hacer clic en el enlace de tracking (más humano)
+        try {
+          // Buscar el campo de tracking o enlace
+          const trackingLink = await page.evaluate(() => {
+            // Buscar enlaces que contengan "tracking" o "rastrear"
+            const links = Array.from(document.querySelectorAll('a'));
+            return links.find(link => {
+              const text = link.textContent.toLowerCase();
+              const href = link.href.toLowerCase();
+              return (text.includes('tracking') || text.includes('rastrear') || 
+                      text.includes('rastreo') || href.includes('tracking'));
+            });
+          });
+          
+          if (trackingLink) {
+            console.log('✅ Encontrado enlace de tracking, haciendo clic...');
+            await page.click('a[href*="tracking"], a:has-text("Rastrear"), a:has-text("Tracking")');
+            await page.waitForTimeout(randomDelay(2000, 4000));
+          }
+        } catch (e) {
+          console.log('⚠️ No se encontró enlace, navegando directamente...');
+        }
       }
-    } catch (e) {
-      console.log('⚠️ No se encontró enlace, navegando directamente...');
     }
     
     // Visitar página de tracking de DHL
