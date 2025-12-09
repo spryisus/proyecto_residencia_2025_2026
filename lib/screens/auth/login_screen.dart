@@ -14,6 +14,7 @@ import '../inventory/jumper_categories_screen.dart' show JumperCategories, Jumpe
 import '../shipments/shipments_screen.dart';
 import '../admin/admin_dashboard.dart';
 import '../settings/settings_screen.dart';
+import '../sdr/solicitud_sdr_screen.dart';
 import '../../widgets/clock_widget.dart';
 import '../../widgets/calendar_widget.dart';
 import '../../widgets/quick_stats_widget.dart';
@@ -659,6 +660,31 @@ class _WelcomePageState extends State<WelcomePage> {
                 await Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const ShipmentsScreen()),
+                );
+                // Recargar sesiones cuando se vuelve
+                if (mounted) {
+                  _loadSessions();
+                }
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.description_outlined, 
+                size: 24,
+                color: Theme.of(context).iconTheme.color,
+              ),
+              title: Text(
+                'Solicitud SDR',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              minVerticalPadding: 16,
+              onTap: () async {
+                Navigator.pop(context);
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SolicitudSdrScreen()),
                 );
                 // Recargar sesiones cuando se vuelve
                 if (mounted) {

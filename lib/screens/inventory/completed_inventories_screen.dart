@@ -13,6 +13,9 @@ import '../../app/config/supabase_client.dart' show supabaseClient;
 import 'completed_inventory_detail_screen.dart';
 import 'category_inventory_screen.dart';
 import 'jumper_categories_screen.dart' show JumperCategories, JumperCategory, JumperCategoriesScreen;
+import '../computo/inventario_computo_screen.dart';
+import '../../domain/entities/categoria.dart';
+import '../../data/services/computo_export_service.dart';
 
 enum SortBy {
   category,
@@ -210,6 +213,63 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
 
   Future<void> _viewInventory(InventorySession session) async {
     try {
+      // Manejo especial para "Equipo de Cómputo" que no tiene categoría en la BD
+      // Verificar por categoryId primero (más confiable)
+      final isComputo = session.categoryId == -1 || 
+                       session.categoryName.toLowerCase().trim().contains('comput') ||
+                       session.categoryName.toLowerCase().trim().contains('cómputo');
+      
+      if (isComputo) {
+        if (session.status == InventorySessionStatus.pending) {
+          // Si está pendiente, redirigir a la pantalla de inventario de cómputo
+          if (!mounted) return;
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const InventarioComputoScreen(),
+            ),
+          );
+        } else {
+          // Si está completada, mostrar los detalles usando una categoría dummy
+          if (!mounted) return;
+          // Crear una categoría dummy para mostrar los detalles
+          final categoriaDummy = Categoria(
+            idCategoria: -1,
+            nombre: 'Equipo de Cómputo',
+            descripcion: 'Equipos de cómputo',
+          );
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CompletedInventoryDetailScreen(
+                session: session,
+                categoria: categoriaDummy,
+              ),
+            ),
+          );
+        }
+        
+        // Recargar sesiones al volver
+        if (mounted) {
+          _loadAllSessions();
+        }
+        return;
+      }
+      
+      // Para otras categorías, verificar que el categoryId sea válido antes de buscar
+      if (session.categoryId <= 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('La categoría asociada no es válida'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+      
+      // Para otras categorías, usar el flujo normal
       final categoria = await _inventarioRepository.getCategoriaById(session.categoryId);
       if (categoria == null) {
         if (mounted) {
@@ -1242,6 +1302,152 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
       return;
     }
 
+    // Separar sesiones de cómputo de las demás
+    final computoSessions = selectedSessions.where((s) => 
+      s.categoryId == -1 || s.categoryName.toLowerCase().contains('comput')
+    ).toList();
+    
+    final otrasSessions = selectedSessions.where((s) => 
+      s.categoryId != -1 && !s.categoryName.toLowerCase().contains('comput')
+    ).toList();
+
+    // Si hay sesiones de cómputo, exportarlas usando ComputoExportService
+    if (computoSessions.isNotEmpty) {
+      try {
+        // Mostrar indicador de carga
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+
+        // Cargar equipos de cómputo desde la base de datos
+        final equiposResponse = await supabaseClient
+            .from('v_equipos_computo_completo')
+            .select('*');
+        
+        final equiposList = List<Map<String, dynamic>>.from(equiposResponse);
+        
+        // Filtrar solo los equipos que están en las sesiones seleccionadas (completados = 1)
+        final equiposCompletados = equiposList.where((equipo) {
+          final inventario = (equipo['inventario']?.toString() ?? '').trim();
+          if (inventario.isEmpty) return false;
+          final inventarioHash = inventario.hashCode.abs();
+          // Verificar si está en alguna de las sesiones de cómputo seleccionadas
+          return computoSessions.any((session) => session.quantities[inventarioHash] == 1);
+        }).toList();
+        
+        // Cargar componentes para cada equipo
+        for (var equipo in equiposCompletados) {
+          try {
+            final inventarioEquipo = equipo['inventario']?.toString() ?? '';
+            if (inventarioEquipo.isNotEmpty) {
+              try {
+                final componentesResponse = await supabaseClient
+                    .from('v_componentes_computo_completo')
+                    .select('*')
+                    .eq('inventario_equipo', inventarioEquipo);
+                
+                equipo['t_componentes_computo'] = List<Map<String, dynamic>>.from(componentesResponse);
+              } catch (e) {
+                try {
+                  final componentesResponseAlt = await supabaseClient
+                      .from('t_componentes_computo')
+                      .select('tipo_componente, marca, modelo, numero_serie')
+                      .eq('inventario_equipo', inventarioEquipo);
+                  
+                  equipo['t_componentes_computo'] = List<Map<String, dynamic>>.from(componentesResponseAlt);
+                } catch (e2) {
+                  equipo['t_componentes_computo'] = [];
+                }
+              }
+            } else {
+              equipo['t_componentes_computo'] = [];
+            }
+          } catch (e) {
+            equipo['t_componentes_computo'] = [];
+          }
+        }
+
+        // Preparar datos para exportación según plantilla (14 columnas, incluyendo COMPONENTES)
+        final itemsToExport = equiposCompletados.map((equipo) {
+          // Formatear componentes: solo el tipo (MONITOR, TECLADO, MOUSE, etc.)
+          final componentes = equipo['t_componentes_computo'] as List<dynamic>? ?? [];
+          final componentesTexto = componentes
+              .map((comp) => (comp['tipo_componente'] ?? '').toString().trim().toUpperCase())
+              .where((tipo) => tipo.isNotEmpty)
+              .join('; ');
+          
+          return {
+            'inventario': equipo['inventario'] ?? '',
+            'tipo_equipo': equipo['tipo_equipo'] ?? '',
+            'marca': equipo['marca'] ?? '',
+            'modelo': equipo['modelo'] ?? '',
+            'procesador': equipo['procesador'] ?? '',
+            'numero_serie': equipo['numero_serie'] ?? '',
+            'disco_duro': equipo['disco_duro'] ?? '',
+            'memoria': equipo['memoria'] ?? '',
+            'sistema_operativo_instalado': equipo['sistema_operativo_instalado'] ?? equipo['sistema_operativo'] ?? '',
+            'office_instalado': equipo['office_instalado'] ?? '',
+            'empleado_asignado': equipo['empleado_asignado_nombre'] ?? equipo['empleado_asignado'] ?? '',
+            'direccion_fisica': equipo['direccion_fisica'] ?? equipo['ubicacion_fisica'] ?? '',
+            'observaciones': equipo['observaciones'] ?? '',
+            'componentes': componentesTexto,
+          };
+        }).toList();
+
+        final filePath = await ComputoExportService.exportComputoToExcel(itemsToExport);
+
+        if (mounted) {
+          Navigator.pop(context); // Cerrar diálogo de carga
+          if (filePath != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Inventario de cómputo exportado: $filePath'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+            
+            // Salir del modo de selección
+            setState(() {
+              _isSelectionMode = false;
+              _selectedSessionIds.clear();
+            });
+          }
+        }
+        return; // Solo exportar cómputo si hay sesiones de cómputo
+      } catch (e) {
+        if (mounted) {
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error al exportar inventario de cómputo: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    // Si solo hay otras sesiones (no cómputo), usar el método original
+    if (otrasSessions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay inventarios seleccionados para exportar'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     // Generar nombre por defecto
     final now = DateTime.now();
     final dateStr = '${now.day.toString().padLeft(2, '0')}_${now.month.toString().padLeft(2, '0')}_${now.year}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
@@ -1330,7 +1536,7 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
       }
 
       // Procesar cada inventario seleccionado
-      for (var session in selectedSessions) {
+      for (var session in otrasSessions) {
         try {
           // Obtener la categoría
           final categoria = await _inventarioRepository.getCategoriaById(session.categoryId);
@@ -1420,7 +1626,7 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
       // Mostrar diálogo de éxito
       if (mounted) {
         final fileName = filePath.split('/').last;
-        _showExportSuccessDialog(filePath, fileName, selectedSessions.length);
+        _showExportSuccessDialog(filePath, fileName, otrasSessions.length);
         
         // Salir del modo de selección
         setState(() {

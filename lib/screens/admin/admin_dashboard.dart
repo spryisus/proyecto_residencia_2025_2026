@@ -7,6 +7,7 @@ import 'reports_screen.dart';
 import '../auth/login_screen.dart';
 import '../inventory/inventory_screen.dart';
 import '../shipments/shipments_screen.dart';
+import '../sdr/solicitud_sdr_screen.dart';
 import '../../widgets/clock_widget.dart';
 import '../../widgets/calendar_widget.dart';
 import '../../widgets/quick_stats_widget.dart';
@@ -215,6 +216,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const ReportsScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.description_outlined, size: 24),
+              title: Text(
+                'Solicitud SDR',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              minVerticalPadding: 16,
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SolicitudSdrScreen()),
                 );
               },
             ),
