@@ -29,7 +29,16 @@ TEMPLATES_DIR = os.path.join(ROOT, "assets", "templates")
 PROJECT_ROOT = os.path.dirname(os.path.dirname(ROOT))  # Subir dos niveles desde excel_generator_service
 PROJECT_ASSETS_DIR = os.path.join(PROJECT_ROOT, "assets")
 
-TEMPLATE_PATH_JUMPERS = os.path.join(TEMPLATES_DIR, "plantilla_jumpers.xlsx")
+# Jumpers: buscar primero en templates del servicio, luego en assets del proyecto
+TEMPLATE_PATH_JUMPERS = (
+    os.path.join(TEMPLATES_DIR, "plantilla_jumpers.xlsx")
+    if os.path.exists(os.path.join(TEMPLATES_DIR, "plantilla_jumpers.xlsx"))
+    else (
+        os.path.join(PROJECT_ASSETS_DIR, "templates", "plantilla_jumpers.xlsx")
+        if os.path.exists(os.path.join(PROJECT_ASSETS_DIR, "templates", "plantilla_jumpers.xlsx"))
+        else os.path.join(PROJECT_ASSETS_DIR, "plantilla_jumpers.xlsx")
+    )
+)
 # Computo: buscar en assets/templates primero, luego en assets directamente
 TEMPLATE_PATH_COMPUTO = (
     os.path.join(PROJECT_ASSETS_DIR, "templates", "plantilla_inventario_computo.xlsx")
@@ -132,6 +141,33 @@ def _get_month_year() -> str:
         'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
     ]
     return f'{months[now.month - 1]} {now.year}'
+
+
+def _get_jumper_category_color(tipo: str) -> Optional[str]:
+    """Obtiene el color hexadecimal para una categoría de jumper según el tipo"""
+    if not tipo:
+        return None
+    
+    tipo_upper = tipo.upper().strip()
+    
+    # Mapeo de categorías a colores (mismos colores que en el frontend)
+    color_map = {
+        'FC-FC': 'FF2196F3',      # Colors.blue
+        'FC-LC': 'FF3F51B5',      # Colors.indigo
+        'FC-SC': 'FF673AB7',      # Colors.deepPurple
+        'LC-FC': 'FF4CAF50',      # Colors.green
+        'LC-LC': 'FFFF9800',      # Colors.orange
+        'SC-FC': 'FF9C27B0',      # Colors.purple
+        'SC-LC': 'FFF44336',      # Colors.red
+        'SC-SC': 'FF009688',      # Colors.teal
+    }
+    
+    # Buscar coincidencia exacta o parcial
+    for category, color in color_map.items():
+        if category in tipo_upper or tipo_upper in category:
+            return color
+    
+    return None
 
 
 def _apply_cell_style(cell, bold: bool = False, center: bool = True):
@@ -371,20 +407,67 @@ async def generate_jumpers_excel(request: Request):
         raise HTTPException(status_code=400, detail="items must be a non-empty list")
 
     try:
-        # Intentar usar plantilla si existe, sino crear desde cero
+        # Intentar usar plantilla si existe
         if _ensure_template(TEMPLATE_PATH_JUMPERS):
             wb = openpyxl.load_workbook(TEMPLATE_PATH_JUMPERS)
             ws = wb.active
-            start_row = 2
+            
+            # Los datos empiezan en la fila 5 según la plantilla
+            # Columnas: B=TIPO, C=TAMAÑO, D=CANTIDAD, E=RACK, F=CONTENEDOR (o #)
+            start_row = 5
+            
+            # Obtener formato de referencia de la fila 5
+            reference_cells = {}
+            for col in range(2, 7):  # Columnas B-F
+                ref_cell = ws.cell(row=start_row, column=col)
+                reference_cells[col] = {
+                    'font': ref_cell.font.copy() if ref_cell.font else None,
+                    'fill': ref_cell.fill.copy() if ref_cell.fill else None,
+                    'border': ref_cell.border.copy() if ref_cell.border else None,
+                    'alignment': ref_cell.alignment.copy() if ref_cell.alignment else None,
+                    'number_format': ref_cell.number_format,
+                }
+            
+            # Insertar datos empezando desde la fila 5
             for idx, item in enumerate(items, start=0):
                 row = start_row + idx
-                ws.cell(row=row, column=1, value=item.get("tipo", item.get("categoryName", "")))
-                ws.cell(row=row, column=2, value=item.get("tamano", item.get("size", "")))
-                ws.cell(row=row, column=3, value=item.get("cantidad", item.get("quantity", 0)))
-                ws.cell(row=row, column=4, value=item.get("rack", ""))
-                ws.cell(row=row, column=5, value=item.get("contenedor", item.get("container", "")))
+                
+                # Obtener el tipo para determinar el color
+                tipo = item.get("tipo", item.get("categoryName", ""))
+                tipo_color = _get_jumper_category_color(tipo)
+                
+                # Col B: TIPO
+                _safe_set_cell_value(ws, row, 2, tipo)
+                # Col C: TAMAÑO (metros)
+                _safe_set_cell_value(ws, row, 3, item.get("tamano", item.get("size", "")))
+                # Col D: CANTIDAD
+                _safe_set_cell_value(ws, row, 4, item.get("cantidad", item.get("quantity", 0)))
+                # Col E: RACK
+                _safe_set_cell_value(ws, row, 5, item.get("rack", ""))
+                # Col F: CONTENEDOR (o #)
+                _safe_set_cell_value(ws, row, 6, item.get("contenedor", item.get("container", "")))
+                
+                # Aplicar formato de la fila 5 a cada celda
+                for col in range(2, 7):
+                    cell = ws.cell(row=row, column=col)
+                    ref_format = reference_cells[col]
+                    
+                    if ref_format['font']:
+                        cell.font = ref_format['font']
+                    if ref_format['fill']:
+                        # Para la columna TIPO (columna B, índice 2), aplicar color según categoría
+                        if col == 2 and tipo_color:
+                            cell.fill = PatternFill(start_color=tipo_color, end_color=tipo_color, fill_type="solid")
+                        else:
+                            cell.fill = ref_format['fill']
+                    if ref_format['border']:
+                        cell.border = ref_format['border']
+                    if ref_format['alignment']:
+                        cell.alignment = ref_format['alignment']
+                    if ref_format['number_format']:
+                        cell.number_format = ref_format['number_format']
         else:
-            # Crear desde cero con formato correcto
+            # Crear desde cero con formato correcto si no hay plantilla
             wb = _create_jumpers_excel(items)
 
         file_bytes = _save_workbook_to_bytes(wb)

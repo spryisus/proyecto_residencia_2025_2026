@@ -10,6 +10,7 @@ import '../../domain/repositories/inventario_repository.dart';
 import '../../core/di/injection_container.dart';
 import '../../app/config/supabase_client.dart' show supabaseClient;
 import '../../data/services/computo_export_service.dart';
+import '../../data/services/jumpers_export_service.dart';
 import 'jumper_categories_screen.dart' show JumperCategory, JumperCategories;
 
 class CompletedInventoryDetailScreen extends StatefulWidget {
@@ -820,6 +821,70 @@ class _CompletedInventoryDetailScreenState extends State<CompletedInventoryDetai
         return;
       }
 
+      // Verificar si es inventario de jumpers
+      final categoryNameLower = widget.session.categoryName.toLowerCase();
+      final isJumpers = categoryNameLower.contains('jumper');
+
+      // Si es jumpers, usar el servicio de exportación específico
+      if (isJumpers) {
+        try {
+          // Mostrar indicador de carga
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => const Center(
+                child: CircularProgressIndicator(),
+              ),
+            );
+          }
+
+          // Preparar datos para exportación según plantilla
+          final itemsToExport = _inventoryItems.map((item) {
+            // Si el item está en la sesión, usar esa cantidad, si no, usar la original
+            final sessionQuantity = _sessionQuantities.containsKey(item.producto.idProducto)
+                ? _sessionQuantities[item.producto.idProducto]!
+                : item.cantidad;
+
+            return {
+              'tipo': _getCategoryDisplayName(widget.session.categoryName), // Tipo (solo subcategoría si es jumper)
+              'tamano': item.producto.tamano?.toString() ?? '',
+              'cantidad': sessionQuantity,
+              'rack': item.producto.rack ?? '',
+              'contenedor': item.producto.contenedor ?? '',
+            };
+          }).toList();
+
+          final filePath = await JumpersExportService.exportJumpersToExcel(itemsToExport);
+
+          if (mounted) {
+            Navigator.pop(context); // Cerrar diálogo de carga
+            if (filePath != null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Inventario exportado: $filePath'),
+                  backgroundColor: Colors.green,
+                  duration: const Duration(seconds: 4),
+                ),
+              );
+            }
+          }
+        } catch (e) {
+          if (mounted) {
+            Navigator.pop(context); // Cerrar diálogo de carga
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error al exportar: $e'),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+        }
+        return;
+      }
+
+      // Para otros tipos de inventario, usar el método manual (mantener compatibilidad)
       // Mostrar indicador de carga
       if (mounted) {
         showDialog(

@@ -14,7 +14,7 @@ services:
         value: 3000
       - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
         value: "false"
-    healthCheckPath: /health
+    healthCheckPath: /keepalive  # Usa /keepalive para mantener el servicio activo y verificar precarga
     # Plan gratuito (se duerme tras inactividad)
     plan: free
     # Para plan pagado, descomentar:

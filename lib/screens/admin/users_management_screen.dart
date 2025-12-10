@@ -1,4 +1,6 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:bcrypt/bcrypt.dart';
 import '../../app/config/supabase_client.dart' show supabaseClient;
 import '../../domain/entities/empleado.dart';
 import '../../domain/entities/rol.dart';
@@ -136,9 +138,56 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
     });
 
     try {
-      // TODO: Implementar creación de usuario en la base de datos
+      final nombreUsuario = _nombreUsuarioController.text.trim();
+      final password = _contrasenaController.text;
+      
+      // Verificar que el usuario no exista
+      final usuarioExistente = await supabaseClient
+          .from('t_empleados')
+          .select('id_empleado')
+          .eq('nombre_usuario', nombreUsuario)
+          .maybeSingle();
+      
+      if (usuarioExistente != null) {
+        throw 'El usuario ya existe';
+      }
+      
+      // Generar UUID v4 para el nuevo empleado
+      final idEmpleado = _generateUuid();
+      
+      // Hashear la contraseña con bcrypt
+      final passwordHash = BCrypt.hashpw(password, BCrypt.gensalt());
+      
       // 1. Insertar en t_empleados
+      await supabaseClient
+          .from('t_empleados')
+          .insert({
+            'id_empleado': idEmpleado,
+            'nombre_usuario': nombreUsuario,
+            'contrasena': passwordHash,
+            'activo': true,
+          });
+      
       // 2. Asignar roles en t_empleado_rol
+      final rolesSeleccionados = _selectedRoles.entries
+          .where((entry) => entry.value)
+          .map((entry) => entry.key)
+          .toList();
+      
+      // Obtener los IDs de los roles seleccionados
+      for (final nombreRol in rolesSeleccionados) {
+        final rol = _rolesDisponibles.firstWhere(
+          (r) => r.nombre.toLowerCase() == nombreRol,
+          orElse: () => throw 'Rol $nombreRol no encontrado',
+        );
+        
+        await supabaseClient
+            .from('t_empleado_rol')
+            .insert({
+              'id_empleado': idEmpleado,
+              'id_rol': rol.idRol,
+            });
+      }
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -178,23 +227,25 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
 
   Future<void> _toggleUserStatus(Empleado empleado) async {
     try {
-      // TODO: Implementar cambio de estado (activar/desactivar)
+      final nuevoEstado = !empleado.activo;
+      
       await supabaseClient
           .from('t_empleados')
-          .update({'activo': !empleado.activo})
+          .update({'activo': nuevoEstado})
           .eq('id_empleado', empleado.idEmpleado);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              empleado.activo
-                  ? 'Usuario desactivado'
-                  : 'Usuario activado',
+              nuevoEstado
+                  ? 'Usuario activado'
+                  : 'Usuario desactivado',
             ),
-            backgroundColor: Colors.green,
+            backgroundColor: nuevoEstado ? Colors.green : Colors.orange,
           ),
         );
+        // Recargar datos para reflejar el cambio
         await _loadData();
       }
     } catch (e) {
@@ -235,9 +286,17 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
     if (confirm != true) return;
 
     try {
-      // TODO: Implementar eliminación de usuario
       // 1. Eliminar roles asociados (t_empleado_rol)
+      await supabaseClient
+          .from('t_empleado_rol')
+          .delete()
+          .eq('id_empleado', empleado.idEmpleado);
+      
       // 2. Eliminar empleado (t_empleados)
+      await supabaseClient
+          .from('t_empleados')
+          .delete()
+          .eq('id_empleado', empleado.idEmpleado);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -512,12 +571,12 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
             leading: CircleAvatar(
               backgroundColor: empleado.activo
                   ? Theme.of(context).colorScheme.primaryContainer
-                  : Colors.grey[300],
+                  : Colors.red[100],
               child: Icon(
                 empleado.activo ? Icons.person : Icons.person_off,
                 color: empleado.activo
                     ? Theme.of(context).colorScheme.primary
-                    : Colors.grey[600],
+                    : Colors.red[700],
               ),
             ),
             title: Text(
@@ -575,7 +634,8 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
                 IconButton(
                   icon: Icon(
                     empleado.activo ? Icons.toggle_on : Icons.toggle_off,
-                    color: empleado.activo ? Colors.green : Colors.grey,
+                    color: empleado.activo ? Colors.green : Colors.red,
+                    size: 32,
                   ),
                   onPressed: () => _toggleUserStatus(empleado),
                   tooltip: empleado.activo ? 'Desactivar' : 'Activar',
@@ -600,6 +660,20 @@ class _UsersManagementScreenState extends State<UsersManagementScreen> {
     final month = local.month.toString().padLeft(2, '0');
     final year = local.year;
     return '$day/$month/$year';
+  }
+
+  /// Genera un UUID v4
+  String _generateUuid() {
+    final random = Random();
+    final bytes = List<int>.generate(16, (i) => random.nextInt(256));
+    
+    // Establecer la versión (4) y la variante
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // Versión 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variante 10
+    
+    // Convertir a formato UUID: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}';
   }
 }
 

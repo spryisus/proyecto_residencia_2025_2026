@@ -25,6 +25,7 @@ class _InventarioComputoScreenState extends State<InventarioComputoScreen> {
   bool _modoInventario = false;
   Set<String> _equiposCompletados = {}; // Set de inventarios completados
   String? _pendingSessionId; // ID de la sesión pendiente actual
+  InventorySession? _pendingSession; // Sesión pendiente completa
   
   // Nuevas opciones de vista y filtros
   String _vistaActual = 'lista'; // 'lista' o 'grid'
@@ -464,18 +465,6 @@ class _InventarioComputoScreenState extends State<InventarioComputoScreen> {
               tooltip: 'Exportar a Excel',
               onPressed: _exportarInventario,
             ),
-          if (!_modoInventario)
-            IconButton(
-              icon: const Icon(Icons.checklist),
-              tooltip: 'Realizar Inventario',
-              onPressed: () async {
-                // Cargar progreso guardado si existe
-                await _cargarProgresoInventario();
-                setState(() {
-                  _modoInventario = true;
-                });
-              },
-            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Actualizar',
@@ -483,6 +472,23 @@ class _InventarioComputoScreenState extends State<InventarioComputoScreen> {
           ),
         ],
       ),
+      floatingActionButton: !_modoInventario && _equiposFiltrados.isNotEmpty
+          ? FloatingActionButton.extended(
+              onPressed: () async {
+                // Cargar progreso guardado si existe
+                await _cargarProgresoInventario();
+                setState(() {
+                  _modoInventario = true;
+                });
+              },
+              backgroundColor: const Color(0xFF003366),
+              icon: const Icon(Icons.inventory_2, color: Colors.white),
+              label: const Text(
+                'Realizar Inventario',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            )
+          : null,
       body: Column(
         children: [
           // Barra de búsqueda mejorada
@@ -542,6 +548,57 @@ class _InventarioComputoScreenState extends State<InventarioComputoScreen> {
               onChanged: _filterEquipos,
             ),
           ),
+
+          // Mensaje de reanudación de inventario pendiente
+          if (_pendingSession != null && _modoInventario) ...[
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceVariant.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.playlist_add_check_circle, color: Theme.of(context).colorScheme.tertiary, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Reanudando inventario guardado el ${_formatSessionDate(_pendingSession!.updatedAt)}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.9),
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      if (_pendingSession != null) {
+                        await _sessionStorage.deleteSession(_pendingSession!.id);
+                        if (!mounted) return;
+                        setState(() {
+                          _pendingSession = null;
+                          _pendingSessionId = null;
+                          _equiposCompletados.clear();
+                        });
+                        await _limpiarProgresoInventario();
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Inventario pendiente descartado'),
+                              backgroundColor: Colors.orange,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text('Descartar'),
+                  ),
+                ],
+              ),
+            ),
+          ],
 
           // Panel de filtros avanzados
           if (_mostrarFiltros && !_modoInventario)
@@ -1741,21 +1798,38 @@ class _InventarioComputoScreenState extends State<InventarioComputoScreen> {
                               ],
                             ),
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: _getEstadoColor(componente['estado']),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              componente['estado'] ?? 'N/A',
-                              style: const TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
+                          if (componente['estado'] != null && componente['estado'].toString().isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _getEstadoColor(componente['estado']),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                componente['estado'].toString(),
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            )
+                          else
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[400],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Sin estado',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
-                          ),
                           const SizedBox(width: 8),
                           IconButton(
                             icon: const Icon(Icons.edit, size: 18),
@@ -2026,6 +2100,7 @@ class _InventarioComputoScreenState extends State<InventarioComputoScreen> {
           setState(() {
             _equiposCompletados = equiposCompletados;
             _pendingSessionId = latestSession.id;
+            _pendingSession = latestSession; // Guardar la sesión completa
           });
           
           if (equiposCompletados.isNotEmpty && mounted) {
@@ -2069,10 +2144,23 @@ class _InventarioComputoScreenState extends State<InventarioComputoScreen> {
           return _equipos.any((equipo) => (equipo['inventario']?.toString() ?? '').trim() == inv);
         }).toSet();
         
+        // Intentar cargar la sesión completa si hay sessionId
+        InventorySession? sessionFromStorage;
+        if (sessionId != null) {
+          try {
+            sessionFromStorage = await _sessionStorage.getSessionById(sessionId);
+          } catch (e) {
+            debugPrint('Error al obtener sesión del storage: $e');
+          }
+        }
+        
         setState(() {
           _equiposCompletados = equiposValidos;
           if (sessionId != null) {
             _pendingSessionId = sessionId;
+          }
+          if (sessionFromStorage != null) {
+            _pendingSession = sessionFromStorage;
           }
         });
         
@@ -2108,10 +2196,31 @@ class _InventarioComputoScreenState extends State<InventarioComputoScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('inventario_computo_pendiente');
+      
+      // Eliminar la sesión del storage si existe
+      if (_pendingSessionId != null) {
+        try {
+          await _sessionStorage.deleteSession(_pendingSessionId!);
+        } catch (e) {
+          debugPrint('Error al eliminar sesión del storage: $e');
+        }
+      }
+      
       print('✅ Progreso del inventario limpiado');
     } catch (e) {
       debugPrint('Error al limpiar progreso del inventario: $e');
     }
+  }
+
+  // Formatear fecha de sesión
+  String _formatSessionDate(DateTime dateTime) {
+    final local = dateTime.toLocal();
+    final day = local.day.toString().padLeft(2, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final year = local.year;
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year $hour:$minute';
   }
 
   // Finalizar inventario
@@ -2168,6 +2277,7 @@ class _InventarioComputoScreenState extends State<InventarioComputoScreen> {
       
       setState(() {
         _pendingSessionId = null;
+        _pendingSession = null;
       });
     } catch (e) {
       debugPrint('Error al finalizar inventario: $e');

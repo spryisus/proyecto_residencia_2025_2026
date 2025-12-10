@@ -11,6 +11,7 @@ import '../../app/config/supabase_client.dart' show supabaseClient;
 import '../inventory/inventory_type_selection_screen.dart';
 import '../inventory/category_inventory_screen.dart';
 import '../inventory/jumper_categories_screen.dart' show JumperCategories, JumperCategory, JumperCategoriesScreen;
+import '../computo/inventario_computo_screen.dart';
 import '../shipments/shipments_screen.dart';
 import '../admin/admin_dashboard.dart';
 import '../settings/settings_screen.dart';
@@ -410,13 +411,27 @@ class _WelcomePageState extends State<WelcomePage> {
 
   Future<void> _openSession(InventorySession session) async {
     try {
+      // Verificar si es inventario de cómputo (categoryId == -1 o nombre contiene "comput")
+      final categoryNameLower = session.categoryName.toLowerCase();
+      if (session.categoryId == -1 || categoryNameLower.contains('comput')) {
+        // Navegar directamente a la pantalla de inventario de cómputo
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const InventarioComputoScreen(),
+          ),
+        );
+        await _loadSessions();
+        return;
+      }
+
+      // Obtener la categoría para otros tipos de inventario
       final categoria = await _inventarioRepository.getCategoriaById(session.categoryId);
       if (categoria == null) {
         throw 'La categoría asociada ya no existe.';
       }
 
       // Verificar si es Jumpers y si tiene subcategoría en el nombre
-      final categoryNameLower = session.categoryName.toLowerCase();
       if (categoryNameLower.contains('jumper')) {
         // Intentar detectar si hay una subcategoría en el nombre (ej: "Jumpers FC-FC")
         JumperCategory? detectedJumperCategory;

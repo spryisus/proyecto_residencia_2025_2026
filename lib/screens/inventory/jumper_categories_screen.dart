@@ -5,6 +5,7 @@ import '../../core/di/injection_container.dart';
 import '../../app/config/supabase_client.dart' show supabaseClient;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'category_inventory_screen.dart' show CategoryInventoryScreen;
+import '../../data/services/jumpers_export_service.dart';
 
 class JumperCategory {
   final String name;
@@ -31,6 +32,20 @@ class JumperCategories {
       icon: Icons.cable,
       color: Colors.blue,
       searchPattern: 'FC-FC|FC/FC|FC FC',
+    ),
+    JumperCategory(
+      name: 'FC-LC',
+      displayName: 'FC-LC',
+      icon: Icons.cable,
+      color: Colors.indigo,
+      searchPattern: 'FC-LC|FC/LC|FC LC',
+    ),
+    JumperCategory(
+      name: 'FC-SC',
+      displayName: 'FC-SC',
+      icon: Icons.cable,
+      color: Colors.deepPurple,
+      searchPattern: 'FC-SC|FC/SC|FC SC',
     ),
     JumperCategory(
       name: 'LC-FC',
@@ -196,6 +211,89 @@ class _JumperCategoriesScreenState extends State<JumperCategoriesScreen> {
     }
   }
 
+  Future<void> _exportAllJumpers() async {
+    try {
+      // Mostrar indicador de carga
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Obtener todos los productos de jumpers
+      final inventario = await _inventarioRepository.getInventarioByCategoria(widget.categoria.idCategoria);
+      
+      // Preparar datos para exportación agrupados por categoría
+      final itemsToExport = <Map<String, dynamic>>[];
+      
+      for (final category in JumperCategories.all) {
+        // Filtrar productos que coinciden con el patrón de esta categoría
+        final categoryItems = inventario.where((item) {
+          final nombre = item.producto.nombre.toUpperCase();
+          final descripcion = (item.producto.descripcion ?? '').toUpperCase();
+          final texto = '$nombre $descripcion';
+          return _matchesPattern(texto, category.searchPattern);
+        }).toList();
+
+        // Agregar cada producto de esta categoría
+        for (final item in categoryItems) {
+          itemsToExport.add({
+            'tipo': category.displayName, // Tipo de conector (ej: SC-LC, FC-FC)
+            'tamano': item.producto.tamano?.toString() ?? '',
+            'cantidad': item.cantidad,
+            'rack': item.producto.rack ?? '',
+            'contenedor': item.producto.contenedor ?? '',
+          });
+        }
+      }
+
+      if (itemsToExport.isEmpty) {
+        if (mounted) {
+          Navigator.pop(context); // Cerrar diálogo de carga
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No hay datos de jumpers para exportar'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Exportar usando el servicio
+      final filePath = await JumpersExportService.exportJumpersToExcel(itemsToExport);
+
+      if (mounted) {
+        Navigator.pop(context); // Cerrar diálogo de carga
+        if (filePath != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Inventario de jumpers exportado: $filePath'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context); // Cerrar diálogo de carga si está abierto
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al exportar jumpers: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -204,6 +302,14 @@ class _JumperCategoriesScreenState extends State<JumperCategoriesScreen> {
         centerTitle: true,
         backgroundColor: const Color(0xFF003366),
         foregroundColor: Colors.white,
+        actions: [
+          if (!_isLoading)
+            IconButton(
+              icon: const Icon(Icons.file_download),
+              tooltip: 'Exportar todos los jumpers',
+              onPressed: _exportAllJumpers,
+            ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -255,6 +361,12 @@ class _JumperCategoriesScreenState extends State<JumperCategoriesScreen> {
                               childAspectRatio = 1.3;
                             }
                         
+                        // Filtrar categorías que tienen productos para evitar espacios en blanco
+                        final categoriesWithProducts = JumperCategories.all.where((category) {
+                          final count = _categoryCounts[category.name] ?? 0;
+                          return count > 0;
+                        }).toList();
+                        
                         return GridView.builder(
                           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: crossAxisCount,
@@ -262,15 +374,10 @@ class _JumperCategoriesScreenState extends State<JumperCategoriesScreen> {
                             mainAxisSpacing: 12,
                             childAspectRatio: childAspectRatio,
                           ),
-                          itemCount: JumperCategories.all.length,
+                          itemCount: categoriesWithProducts.length,
                           itemBuilder: (context, index) {
-                            final category = JumperCategories.all[index];
+                            final category = categoriesWithProducts[index];
                             final count = _categoryCounts[category.name] ?? 0;
-                            
-                            // Solo mostrar categorías que tengan productos
-                            if (count == 0) {
-                              return const SizedBox.shrink();
-                            }
                             
                             return _buildCategoryCard(category, count);
                           },

@@ -16,6 +16,7 @@ import 'jumper_categories_screen.dart' show JumperCategories, JumperCategory, Ju
 import '../computo/inventario_computo_screen.dart';
 import '../../domain/entities/categoria.dart';
 import '../../data/services/computo_export_service.dart';
+import '../../data/services/jumpers_export_service.dart';
 
 enum SortBy {
   category,
@@ -285,7 +286,19 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
 
       // Si la sesión está pendiente, redirigir al inventario para continuarlo
       if (session.status == InventorySessionStatus.pending) {
-        await _openPendingSession(session, categoria);
+        // Verificar si es inventario de cómputo
+        final categoryNameLower = session.categoryName.toLowerCase();
+        if (session.categoryId == -1 || categoryNameLower.contains('comput')) {
+          // Navegar directamente a la pantalla de inventario de cómputo
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const InventarioComputoScreen(),
+            ),
+          );
+        } else {
+          await _openPendingSession(session, categoria);
+        }
       } else {
         // Si está completada, mostrar los detalles
         if (!mounted) return;
@@ -1302,13 +1315,21 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
       return;
     }
 
-    // Separar sesiones de cómputo de las demás
+    // Separar sesiones de cómputo, jumpers y otras
     final computoSessions = selectedSessions.where((s) => 
       s.categoryId == -1 || s.categoryName.toLowerCase().contains('comput')
     ).toList();
     
+    final jumpersSessions = selectedSessions.where((s) => 
+      s.categoryId != -1 && 
+      !s.categoryName.toLowerCase().contains('comput') &&
+      s.categoryName.toLowerCase().contains('jumper')
+    ).toList();
+    
     final otrasSessions = selectedSessions.where((s) => 
-      s.categoryId != -1 && !s.categoryName.toLowerCase().contains('comput')
+      s.categoryId != -1 && 
+      !s.categoryName.toLowerCase().contains('comput') &&
+      !s.categoryName.toLowerCase().contains('jumper')
     ).toList();
 
     // Si hay sesiones de cómputo, exportarlas usando ComputoExportService
@@ -1437,7 +1458,107 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
       }
     }
 
-    // Si solo hay otras sesiones (no cómputo), usar el método original
+    // Si hay sesiones de jumpers, exportarlas usando JumpersExportService
+    if (jumpersSessions.isNotEmpty) {
+      try {
+        // Mostrar indicador de carga
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+
+        // Preparar datos de todos los jumpers de las sesiones seleccionadas
+        final itemsToExport = <Map<String, dynamic>>[];
+        
+        for (var session in jumpersSessions) {
+          try {
+            // Obtener la categoría
+            final categoria = await _inventarioRepository.getCategoriaById(session.categoryId);
+            if (categoria == null) continue;
+
+            // Obtener todos los items de la categoría
+            var allItems = await _inventarioRepository.getInventarioByCategoria(categoria.idCategoria);
+            
+            // Filtrar por subcategoría de jumper si aplica
+            allItems = _filterItemsByJumperCategory(allItems, session.categoryName);
+
+            // Agregar datos de cada producto
+            for (var item in allItems) {
+              // Si el item está en la sesión, usar esa cantidad, si no, usar la original
+              final sessionQuantity = session.quantities.containsKey(item.producto.idProducto)
+                  ? session.quantities[item.producto.idProducto]!
+                  : item.cantidad;
+
+              itemsToExport.add({
+                'tipo': _getCategoryDisplayName(session.categoryName), // Tipo (solo subcategoría si es jumper)
+                'tamano': item.producto.tamano?.toString() ?? '',
+                'cantidad': sessionQuantity,
+                'rack': item.producto.rack ?? '',
+                'contenedor': item.producto.contenedor ?? '',
+              });
+            }
+          } catch (e) {
+            debugPrint('Error al procesar inventario de jumpers ${session.id}: $e');
+            // Continuar con el siguiente inventario
+          }
+        }
+
+        if (itemsToExport.isEmpty) {
+          if (mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('No hay datos de jumpers para exportar'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          return;
+        }
+
+        final filePath = await JumpersExportService.exportJumpersToExcel(itemsToExport);
+
+        if (mounted) {
+          Navigator.pop(context); // Cerrar diálogo de carga
+          if (filePath != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Inventario de jumpers exportado: $filePath'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+            
+            // Salir del modo de selección
+            setState(() {
+              _isSelectionMode = false;
+              _selectedSessionIds.clear();
+            });
+          }
+        }
+        return; // Solo exportar jumpers si hay sesiones de jumpers
+      } catch (e) {
+        if (mounted) {
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error al exportar inventario de jumpers: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    // Si solo hay otras sesiones (no cómputo ni jumpers), usar el método original
     if (otrasSessions.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
