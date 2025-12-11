@@ -165,6 +165,10 @@ class _LoginScreenState extends State<LoginScreen> {
       await _saveSession(empleadoId, nombreUsuario);
 
       if (!mounted) return;
+      
+      // Determinar el rol principal del usuario
+      final rolPrincipal = roles.first['t_roles']['nombre']?.toString().toLowerCase() ?? 'usuario';
+      
       // Notificación breve y navegación según rol
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -173,27 +177,31 @@ class _LoginScreenState extends State<LoginScreen> {
           duration: Duration(seconds: 1),
         ),
       );
-      await Future.delayed(const Duration(milliseconds: 300));
+      
+      // Usar un pequeño delay y verificar mounted antes de navegar
+      await Future.delayed(const Duration(milliseconds: 100));
       if (!mounted) return;
       
-      // Determinar el rol principal del usuario
-      final rolPrincipal = roles.first['t_roles']['nombre']?.toString().toLowerCase() ?? 'usuario';
-      
-      if (rolPrincipal == 'admin') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => AdminDashboard(username: nombreUsuario),
-          ),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => WelcomePage(username: nombreUsuario),
-          ),
-        );
-      }
+      // Navegar usando WidgetsBinding para asegurar que el frame se complete
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        
+        if (rolPrincipal == 'admin') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AdminDashboard(username: nombreUsuario),
+            ),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => WelcomePage(username: nombreUsuario),
+            ),
+          );
+        }
+      });
     } on PostgrestException catch (e) {
       String mensaje = 'Error de conexión con la base de datos';
       if (e.code == 'PGRST116') {
@@ -221,11 +229,14 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoggingIn = false;
-        });
-      }
+      // Usar un pequeño delay antes de actualizar el estado para evitar problemas de dependencias
+      Future.delayed(const Duration(milliseconds: 50), () {
+        if (mounted) {
+          setState(() {
+            _isLoggingIn = false;
+          });
+        }
+      });
     }
   }
 
@@ -333,7 +344,18 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 12),
                         TextButton(
                           onPressed: _isTestingConnection ? null : _testConnection,
-                          child: const Text('Probar Conexión Supabase'),
+                          child: Text(
+                            'Probar Conexión Supabase',
+                            style: TextStyle(
+                              inherit: false,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: _isTestingConnection 
+                                ? Theme.of(context).disabledColor 
+                                : Theme.of(context).colorScheme.primary,
+                              decoration: TextDecoration.none,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -789,32 +811,36 @@ class _WelcomePageState extends State<WelcomePage> {
                     ],
                   ),
                 const SizedBox(height: 24),
-                SizedBox(
-                  width: 280,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const LoginScreen(),
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 280),
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const LoginScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.logout, size: 24),
+                      label: Text(
+                        'Volver al login',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
                         ),
-                      );
-                    },
-                    icon: const Icon(Icons.logout, size: 24),
-                    label: Text(
-                      'Volver al login',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).primaryColor,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).primaryColor,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 4,
+                        minimumSize: const Size(double.infinity, 48),
                       ),
-                      elevation: 4,
                     ),
                   ),
                 ),
@@ -871,33 +897,47 @@ class _WelcomePageState extends State<WelcomePage> {
             color: chipColor,
           ),
         ),
-        title: Text(session.categoryName),
-        subtitle: Text('Actualizado: ${_formatDate(session.updatedAt)}'),
-        trailing: Wrap(
-          spacing: 8,
+        title: Text(
+          session.categoryName,
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+        ),
+        subtitle: Text(
+          'Actualizado: ${_formatDate(session.updatedAt)}',
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: chipColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                isPending ? 'Pendiente' : 'Terminado',
-                style: TextStyle(
-                  color: chipColor,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 12,
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: chipColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  isPending ? 'Pendiente' : 'Terminado',
+                  style: TextStyle(
+                    color: chipColor,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
             IconButton(
               icon: const Icon(Icons.delete_outline, size: 20),
               color: Colors.red[300],
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
               onPressed: () => _deleteSession(session),
             ),
           ],
         ),
+        isThreeLine: false,
         onTap: () => _openSession(session),
       ),
     );

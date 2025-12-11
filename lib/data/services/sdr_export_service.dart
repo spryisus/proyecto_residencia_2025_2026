@@ -1,14 +1,11 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:excel/excel.dart';
-import 'package:file_picker/file_picker.dart';
 import '../../app/config/excel_service_config.dart';
-
-// Importar para web (solo disponible en web)
-import 'dart:html' as html if (dart.library.html) 'dart:html';
+import '../../core/utils/file_saver_helper.dart';
+import '../../core/utils/web_file_helper.dart' if (dart.library.io) '../../core/utils/web_file_helper_stub.dart';
 
 /// Servicio para exportar datos SDR a Excel usando la plantilla
 class SdrExportService {
@@ -92,37 +89,15 @@ class SdrExportService {
 
       // Para web, descargar directamente
       if (kIsWeb) {
-        final blob = html.Blob([response.bodyBytes]);
-        final url = html.Url.createObjectUrlFromBlob(blob);
-        html.AnchorElement(href: url)
-          ..setAttribute('download', defaultFileName)
-          ..click();
-        html.Url.revokeObjectUrl(url);
-        return 'Descargado: $defaultFileName';
+        return downloadFileWeb(response.bodyBytes, defaultFileName);
       }
 
-      // Para móvil/desktop, usar FilePicker
-      String? filePath = await FilePicker.platform.saveFile(
+      // Para móvil/desktop, usar el helper
+      return await FileSaverHelper.saveFile(
+        fileBytes: response.bodyBytes,
+        defaultFileName: defaultFileName,
         dialogTitle: 'Guardar solicitud SDR como',
-        fileName: defaultFileName,
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
       );
-
-      if (filePath == null) {
-        return null; // Usuario canceló
-      }
-
-      // Asegurar que el archivo tenga la extensión .xlsx
-      if (!filePath.endsWith('.xlsx')) {
-        filePath = '$filePath.xlsx';
-      }
-
-      // Guardar el archivo
-      final file = File(filePath);
-      await file.writeAsBytes(response.bodyBytes);
-
-      return filePath;
     } catch (e) {
       // Si el servicio Python no está disponible, usar método alternativo con plantilla local
       if (e.toString().contains('Connection refused') || 
@@ -225,37 +200,15 @@ class SdrExportService {
 
       // Para web, descargar directamente
       if (kIsWeb) {
-        final blob = html.Blob([fileBytes]);
-        final url = html.Url.createObjectUrlFromBlob(blob);
-        html.AnchorElement(href: url)
-          ..setAttribute('download', defaultFileName)
-          ..click();
-        html.Url.revokeObjectUrl(url);
-        return 'Descargado: $defaultFileName';
+        return downloadFileWeb(fileBytes, defaultFileName);
       }
 
-      // Para móvil/desktop, usar FilePicker
-      String? filePath = await FilePicker.platform.saveFile(
+      // Para móvil/desktop, usar el helper
+      return await FileSaverHelper.saveFile(
+        fileBytes: fileBytes,
+        defaultFileName: defaultFileName,
         dialogTitle: 'Guardar solicitud SDR como',
-        fileName: defaultFileName,
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
       );
-
-      if (filePath == null) {
-        return null; // Usuario canceló
-      }
-
-      // Asegurar que el archivo tenga la extensión .xlsx
-      if (!filePath.endsWith('.xlsx')) {
-        filePath = '$filePath.xlsx';
-      }
-
-      // Guardar el archivo
-      final file = File(filePath);
-      await file.writeAsBytes(fileBytes);
-
-      return filePath;
     } catch (e) {
       throw Exception('Error al exportar SDR a Excel: $e');
     }

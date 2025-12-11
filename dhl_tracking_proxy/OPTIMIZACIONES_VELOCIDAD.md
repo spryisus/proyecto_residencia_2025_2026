@@ -123,3 +123,4 @@ El campo `preloadStatus` te dirá:
 2. Configurar un servicio de keep-alive externo (recomendado)
 3. Probar las consultas y verificar las mejoras de velocidad
 
+

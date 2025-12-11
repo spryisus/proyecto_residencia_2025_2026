@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:excel/excel.dart' as excel_lib show Border, BorderStyle;
-import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import '../../domain/entities/inventory_session.dart';
 import '../../domain/entities/inventario_completo.dart';
@@ -10,6 +9,7 @@ import '../../data/local/inventory_session_storage.dart';
 import '../../core/di/injection_container.dart';
 import '../../domain/repositories/inventario_repository.dart';
 import '../../app/config/supabase_client.dart' show supabaseClient;
+import '../../core/utils/file_saver_helper.dart';
 import 'completed_inventory_detail_screen.dart';
 import 'category_inventory_screen.dart';
 import 'jumper_categories_screen.dart' show JumperCategories, JumperCategory, JumperCategoriesScreen;
@@ -1574,23 +1574,6 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
     final dateStr = '${now.day.toString().padLeft(2, '0')}_${now.month.toString().padLeft(2, '0')}_${now.year}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
     final defaultFileName = 'Inventarios_Multiples_$dateStr.xlsx';
 
-    // Seleccionar ubicación y nombre del archivo usando saveFile
-    String? filePath = await FilePicker.platform.saveFile(
-      dialogTitle: 'Guardar inventarios como',
-      fileName: defaultFileName,
-      type: FileType.custom,
-      allowedExtensions: ['xlsx'],
-    );
-    
-    if (filePath == null) {
-      return; // Usuario canceló
-    }
-    
-    // Asegurar que el archivo tenga la extensión .xlsx
-    if (!filePath.endsWith('.xlsx')) {
-      filePath = '$filePath.xlsx';
-    }
-
     try {
       // Mostrar indicador de carga
       if (!mounted) return;
@@ -1736,8 +1719,19 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
         return;
       }
 
-      final file = File(filePath);
-      await file.writeAsBytes(fileBytes);
+      // Usar el helper para guardar el archivo
+      String? filePath = await FileSaverHelper.saveFile(
+        fileBytes: fileBytes,
+        defaultFileName: defaultFileName,
+        dialogTitle: 'Guardar inventarios como',
+      );
+      
+      if (filePath == null) {
+        if (mounted) {
+          Navigator.pop(context); // Cerrar diálogo de carga
+        }
+        return; // Usuario canceló
+      }
 
       // Cerrar diálogo de carga
       if (mounted) {

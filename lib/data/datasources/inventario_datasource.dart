@@ -91,9 +91,14 @@ class SupabaseInventarioDataSource implements InventarioDataSource {
   @override
   Future<ProductoModel> updateProducto(ProductoModel producto) async {
     try {
+      // Remover id_producto del JSON ya que es una columna IDENTITY GENERATED ALWAYS
+      // y no puede ser actualizada
+      final json = producto.toJson();
+      json.remove('id_producto');
+      
       final response = await supabaseClient
           .from('t_productos')
-          .update(producto.toJson())
+          .update(json)
           .eq('id_producto', producto.idProducto)
           .select()
           .single();

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:excel/excel.dart' as excel_lib show Border, BorderStyle;
-import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import '../../domain/entities/inventory_session.dart';
 import '../../domain/entities/categoria.dart';
@@ -11,6 +10,7 @@ import '../../core/di/injection_container.dart';
 import '../../app/config/supabase_client.dart' show supabaseClient;
 import '../../data/services/computo_export_service.dart';
 import '../../data/services/jumpers_export_service.dart';
+import '../../core/utils/file_saver_helper.dart';
 import 'jumper_categories_screen.dart' show JumperCategory, JumperCategories;
 
 class CompletedInventoryDetailScreen extends StatefulWidget {
@@ -1000,27 +1000,6 @@ class _CompletedInventoryDetailScreenState extends State<CompletedInventoryDetai
       // Generar nombre por defecto con fecha
       final dateStr = _formatDate(widget.session.updatedAt).replaceAll('/', '_').replaceAll(' ', '_').replaceAll(':', '');
       final defaultFileName = 'Inventario_${widget.session.categoryName.replaceAll(' ', '_')}_$dateStr.xlsx';
-
-      // Seleccionar ubicación y nombre del archivo usando saveFile
-      String? filePath = await FilePicker.platform.saveFile(
-        dialogTitle: 'Guardar inventario como',
-        fileName: defaultFileName,
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-      );
-      
-      if (filePath == null) {
-        // Usuario canceló
-        if (mounted) {
-          Navigator.pop(context); // Cerrar diálogo de carga
-        }
-        return;
-      }
-      
-      // Asegurar que el archivo tenga la extensión .xlsx
-      if (!filePath.endsWith('.xlsx')) {
-        filePath = '$filePath.xlsx';
-      }
       
       List<int>? fileBytes = excel.save();
       if (fileBytes == null) {
@@ -1036,8 +1015,20 @@ class _CompletedInventoryDetailScreenState extends State<CompletedInventoryDetai
         return;
       }
 
-      final file = File(filePath);
-      await file.writeAsBytes(fileBytes);
+      // Usar el helper para guardar el archivo
+      String? filePath = await FileSaverHelper.saveFile(
+        fileBytes: fileBytes,
+        defaultFileName: defaultFileName,
+        dialogTitle: 'Guardar inventario como',
+      );
+      
+      if (filePath == null) {
+        // Usuario canceló
+        if (mounted) {
+          Navigator.pop(context); // Cerrar diálogo de carga
+        }
+        return;
+      }
 
       // Cerrar diálogo de carga
       if (mounted) {
@@ -1139,44 +1130,42 @@ class _CompletedInventoryDetailScreenState extends State<CompletedInventoryDetai
               onPressed: () async {
                 Navigator.of(context).pop(); // Cerrar el diálogo primero
                 
-                // Intentar abrir la carpeta donde se guardó el archivo
+                // Intentar abrir el archivo o la carpeta
                 try {
-                  final directory = Directory(filePath).parent;
-                  
-                  if (Platform.isLinux) {
-                    // En Linux usar xdg-open
-                    await Process.run('xdg-open', [directory.path]);
-                  } else if (Platform.isWindows) {
-                    // En Windows usar explorer
-                    await Process.run('explorer', [directory.path]);
-                  } else if (Platform.isMacOS) {
-                    // En macOS usar open
-                    await Process.run('open', [directory.path]);
+                  if (Platform.isAndroid || Platform.isIOS) {
+                    // En móvil, abrir el archivo directamente
+                    await FileSaverHelper.openFile(filePath);
                   } else {
-                    // Para móvil, mostrar mensaje
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Archivo guardado en: $filePath'),
-                          duration: const Duration(seconds: 3),
-                        ),
-                      );
+                    // En desktop, abrir la carpeta
+                    final directory = Directory(filePath).parent;
+                    
+                    if (Platform.isLinux) {
+                      // En Linux usar xdg-open
+                      await Process.run('xdg-open', [directory.path]);
+                    } else if (Platform.isWindows) {
+                      // En Windows usar explorer
+                      await Process.run('explorer', [directory.path]);
+                    } else if (Platform.isMacOS) {
+                      // En macOS usar open
+                      await Process.run('open', [directory.path]);
                     }
                   }
                 } catch (e) {
-                  // Si falla abrir la carpeta, al menos mostrar la ruta
+                  // Si falla, mostrar mensaje
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Ruta del archivo: $filePath'),
+                        content: Text(Platform.isAndroid || Platform.isIOS 
+                          ? 'Archivo guardado. Puedes compartirlo desde tu gestor de archivos.'
+                          : 'Ruta del archivo: $filePath'),
                         duration: const Duration(seconds: 4),
                       ),
                     );
                   }
                 }
               },
-              icon: const Icon(Icons.folder_open, size: 18),
-              label: const Text('Abrir carpeta'),
+              icon: Icon(Platform.isAndroid || Platform.isIOS ? Icons.open_in_new : Icons.folder_open, size: 18),
+              label: Text(Platform.isAndroid || Platform.isIOS ? 'Abrir archivo' : 'Abrir carpeta'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green,
                 foregroundColor: Colors.white,

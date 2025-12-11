@@ -199,6 +199,12 @@ class _JumperCategoriesScreenState extends State<JumperCategoriesScreen> {
           ),
         ),
       );
+      
+      // Recargar los conteos cuando se vuelve de la pantalla de inventario
+      // para reflejar cualquier cambio realizado
+      if (mounted) {
+        await _loadCategoryCounts();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
