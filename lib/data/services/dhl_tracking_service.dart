@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import '../models/tracking_event_model.dart';
 import '../../domain/entities/tracking_event.dart';
@@ -106,6 +107,27 @@ class DHLTrackingService {
       final proxyUrlClean = proxyUrl!.endsWith('/') 
           ? proxyUrl!.substring(0, proxyUrl!.length - 1) 
           : proxyUrl!;
+      
+      // OPTIMIZACIÓN: Llamar a /warmup primero para precargar la página
+      // Esto acelera significativamente la primera consulta
+      try {
+        final warmupUrl = Uri.parse('$proxyUrlClean/warmup');
+        await http.get(warmupUrl).timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            // Si el warmup falla, continuar de todas formas
+            debugPrint('⚠️ Warmup timeout, continuando con consulta normal...');
+            return http.Response('', 408); // Retornar respuesta vacía para evitar error
+          },
+        ).catchError((e) {
+          // Si el warmup falla, continuar de todas formas
+          debugPrint('⚠️ Error en warmup, continuando con consulta normal: $e');
+          return http.Response('', 500); // Retornar respuesta vacía para evitar error
+        });
+      } catch (e) {
+        // Si el warmup falla, continuar de todas formas
+        debugPrint('⚠️ No se pudo hacer warmup, continuando: $e');
+      }
       
       final url = Uri.parse('$proxyUrlClean/api/track/$trackingNumber');
 

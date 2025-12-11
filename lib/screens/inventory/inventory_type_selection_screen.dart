@@ -9,6 +9,7 @@ import 'category_inventory_screen.dart';
 import 'jumper_categories_screen.dart';
 import 'qr_scanner_screen.dart';
 import 'completed_inventories_screen.dart';
+import '../computo/inventario_computo_screen.dart';
 
 class InventoryTypeSelectionScreen extends StatefulWidget {
   const InventoryTypeSelectionScreen({super.key});
@@ -78,8 +79,6 @@ class _InventoryTypeSelectionScreenState extends State<InventoryTypeSelectionScr
           // Mapear a los nombres de las tarjetas
           if (nombreCategoria.contains('jumper')) {
             countMap['Jumpers'] = cantidad;
-          } else if (nombreCategoria.contains('comput') || nombreCategoria.contains('cómputo') || nombreCategoria.contains('computo')) {
-            countMap['Equipo de Cómputo'] = cantidad;
           } else if (nombreCategoria.contains('medición') || nombreCategoria.contains('medicion')) {
             countMap['Equipo de Medición'] = cantidad;
           }
@@ -87,6 +86,17 @@ class _InventoryTypeSelectionScreenState extends State<InventoryTypeSelectionScr
           // Si hay error al obtener una categoría, continuar con las demás
           debugPrint('Error al contar productos de categoría ${categoria.nombre}: $e');
         }
+      }
+      
+      // Contar equipos de cómputo directamente desde t_equipos_computo
+      try {
+        final equiposComputo = await supabaseClient
+            .from('t_equipos_computo')
+            .select('inventario');
+        countMap['Equipo de Cómputo'] = equiposComputo.length;
+      } catch (e) {
+        debugPrint('Error al contar equipos de cómputo: $e');
+        countMap['Equipo de Cómputo'] = 0;
       }
 
       var sessions = await _sessionStorage.getAllSessions();
@@ -191,6 +201,16 @@ class _InventoryTypeSelectionScreenState extends State<InventoryTypeSelectionScr
               categoria: categoriaEncontrada!,
               categoriaNombre: categoryName,
             ),
+          ),
+        );
+      } else if (categoryName.toLowerCase().contains('cómputo') || 
+                 categoryName.toLowerCase().contains('computo') ||
+                 searchTerm.toLowerCase().contains('comput')) {
+        // Para Equipo de Cómputo, navegar a la pantalla específica de inventario de cómputo
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const InventarioComputoScreen(),
           ),
         );
       } else {

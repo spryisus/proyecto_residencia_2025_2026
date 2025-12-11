@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:excel/excel.dart' as excel_lib show Border, BorderStyle;
-import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import '../../domain/entities/inventory_session.dart';
 import '../../domain/entities/inventario_completo.dart';
@@ -10,9 +9,14 @@ import '../../data/local/inventory_session_storage.dart';
 import '../../core/di/injection_container.dart';
 import '../../domain/repositories/inventario_repository.dart';
 import '../../app/config/supabase_client.dart' show supabaseClient;
+import '../../core/utils/file_saver_helper.dart';
 import 'completed_inventory_detail_screen.dart';
 import 'category_inventory_screen.dart';
 import 'jumper_categories_screen.dart' show JumperCategories, JumperCategory, JumperCategoriesScreen;
+import '../computo/inventario_computo_screen.dart';
+import '../../domain/entities/categoria.dart';
+import '../../data/services/computo_export_service.dart';
+import '../../data/services/jumpers_export_service.dart';
 
 enum SortBy {
   category,
@@ -210,6 +214,63 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
 
   Future<void> _viewInventory(InventorySession session) async {
     try {
+      // Manejo especial para "Equipo de Cómputo" que no tiene categoría en la BD
+      // Verificar por categoryId primero (más confiable)
+      final isComputo = session.categoryId == -1 || 
+                       session.categoryName.toLowerCase().trim().contains('comput') ||
+                       session.categoryName.toLowerCase().trim().contains('cómputo');
+      
+      if (isComputo) {
+        if (session.status == InventorySessionStatus.pending) {
+          // Si está pendiente, redirigir a la pantalla de inventario de cómputo
+          if (!mounted) return;
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const InventarioComputoScreen(),
+            ),
+          );
+        } else {
+          // Si está completada, mostrar los detalles usando una categoría dummy
+          if (!mounted) return;
+          // Crear una categoría dummy para mostrar los detalles
+          final categoriaDummy = Categoria(
+            idCategoria: -1,
+            nombre: 'Equipo de Cómputo',
+            descripcion: 'Equipos de cómputo',
+          );
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CompletedInventoryDetailScreen(
+                session: session,
+                categoria: categoriaDummy,
+              ),
+            ),
+          );
+        }
+        
+        // Recargar sesiones al volver
+        if (mounted) {
+          _loadAllSessions();
+        }
+        return;
+      }
+      
+      // Para otras categorías, verificar que el categoryId sea válido antes de buscar
+      if (session.categoryId <= 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('La categoría asociada no es válida'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+      
+      // Para otras categorías, usar el flujo normal
       final categoria = await _inventarioRepository.getCategoriaById(session.categoryId);
       if (categoria == null) {
         if (mounted) {
@@ -225,7 +286,19 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
 
       // Si la sesión está pendiente, redirigir al inventario para continuarlo
       if (session.status == InventorySessionStatus.pending) {
-        await _openPendingSession(session, categoria);
+        // Verificar si es inventario de cómputo
+        final categoryNameLower = session.categoryName.toLowerCase();
+        if (session.categoryId == -1 || categoryNameLower.contains('comput')) {
+          // Navegar directamente a la pantalla de inventario de cómputo
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const InventarioComputoScreen(),
+            ),
+          );
+        } else {
+          await _openPendingSession(session, categoria);
+        }
       } else {
         // Si está completada, mostrar los detalles
         if (!mounted) return;
@@ -1242,27 +1315,264 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
       return;
     }
 
+    // Separar sesiones de cómputo, jumpers y otras
+    final computoSessions = selectedSessions.where((s) => 
+      s.categoryId == -1 || s.categoryName.toLowerCase().contains('comput')
+    ).toList();
+    
+    final jumpersSessions = selectedSessions.where((s) => 
+      s.categoryId != -1 && 
+      !s.categoryName.toLowerCase().contains('comput') &&
+      s.categoryName.toLowerCase().contains('jumper')
+    ).toList();
+    
+    final otrasSessions = selectedSessions.where((s) => 
+      s.categoryId != -1 && 
+      !s.categoryName.toLowerCase().contains('comput') &&
+      !s.categoryName.toLowerCase().contains('jumper')
+    ).toList();
+
+    // Si hay sesiones de cómputo, exportarlas usando ComputoExportService
+    if (computoSessions.isNotEmpty) {
+      try {
+        // Mostrar indicador de carga
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+
+        // Cargar equipos de cómputo desde la base de datos
+        final equiposResponse = await supabaseClient
+            .from('v_equipos_computo_completo')
+            .select('*');
+        
+        final equiposList = List<Map<String, dynamic>>.from(equiposResponse);
+        
+        // Filtrar solo los equipos que están en las sesiones seleccionadas (completados = 1)
+        final equiposCompletados = equiposList.where((equipo) {
+          final inventario = (equipo['inventario']?.toString() ?? '').trim();
+          if (inventario.isEmpty) return false;
+          final inventarioHash = inventario.hashCode.abs();
+          // Verificar si está en alguna de las sesiones de cómputo seleccionadas
+          return computoSessions.any((session) => session.quantities[inventarioHash] == 1);
+        }).toList();
+        
+        // Cargar componentes para cada equipo
+        for (var equipo in equiposCompletados) {
+          try {
+            final inventarioEquipo = equipo['inventario']?.toString() ?? '';
+            if (inventarioEquipo.isNotEmpty) {
+              try {
+                final componentesResponse = await supabaseClient
+                    .from('v_componentes_computo_completo')
+                    .select('*')
+                    .eq('inventario_equipo', inventarioEquipo);
+                
+                equipo['t_componentes_computo'] = List<Map<String, dynamic>>.from(componentesResponse);
+              } catch (e) {
+                try {
+                  final componentesResponseAlt = await supabaseClient
+                      .from('t_componentes_computo')
+                      .select('tipo_componente, marca, modelo, numero_serie')
+                      .eq('inventario_equipo', inventarioEquipo);
+                  
+                  equipo['t_componentes_computo'] = List<Map<String, dynamic>>.from(componentesResponseAlt);
+                } catch (e2) {
+                  equipo['t_componentes_computo'] = [];
+                }
+              }
+            } else {
+              equipo['t_componentes_computo'] = [];
+            }
+          } catch (e) {
+            equipo['t_componentes_computo'] = [];
+          }
+        }
+
+        // Preparar datos para exportación según plantilla (14 columnas, incluyendo COMPONENTES)
+        final itemsToExport = equiposCompletados.map((equipo) {
+          // Formatear componentes: solo el tipo (MONITOR, TECLADO, MOUSE, etc.)
+          final componentes = equipo['t_componentes_computo'] as List<dynamic>? ?? [];
+          final componentesTexto = componentes
+              .map((comp) => (comp['tipo_componente'] ?? '').toString().trim().toUpperCase())
+              .where((tipo) => tipo.isNotEmpty)
+              .join('; ');
+          
+          return {
+            'inventario': equipo['inventario'] ?? '',
+            'tipo_equipo': equipo['tipo_equipo'] ?? '',
+            'marca': equipo['marca'] ?? '',
+            'modelo': equipo['modelo'] ?? '',
+            'procesador': equipo['procesador'] ?? '',
+            'numero_serie': equipo['numero_serie'] ?? '',
+            'disco_duro': equipo['disco_duro'] ?? '',
+            'memoria': equipo['memoria'] ?? '',
+            'sistema_operativo_instalado': equipo['sistema_operativo_instalado'] ?? equipo['sistema_operativo'] ?? '',
+            'office_instalado': equipo['office_instalado'] ?? '',
+            'empleado_asignado': equipo['empleado_asignado_nombre'] ?? equipo['empleado_asignado'] ?? '',
+            'direccion_fisica': equipo['direccion_fisica'] ?? equipo['ubicacion_fisica'] ?? '',
+            'observaciones': equipo['observaciones'] ?? '',
+            'componentes': componentesTexto,
+          };
+        }).toList();
+
+        final filePath = await ComputoExportService.exportComputoToExcel(itemsToExport);
+
+        if (mounted) {
+          Navigator.pop(context); // Cerrar diálogo de carga
+          if (filePath != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Inventario de cómputo exportado: $filePath'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+            
+            // Salir del modo de selección
+            setState(() {
+              _isSelectionMode = false;
+              _selectedSessionIds.clear();
+            });
+          }
+        }
+        return; // Solo exportar cómputo si hay sesiones de cómputo
+      } catch (e) {
+        if (mounted) {
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error al exportar inventario de cómputo: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    // Si hay sesiones de jumpers, exportarlas usando JumpersExportService
+    if (jumpersSessions.isNotEmpty) {
+      try {
+        // Mostrar indicador de carga
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+
+        // Preparar datos de todos los jumpers de las sesiones seleccionadas
+        final itemsToExport = <Map<String, dynamic>>[];
+        
+        for (var session in jumpersSessions) {
+          try {
+            // Obtener la categoría
+            final categoria = await _inventarioRepository.getCategoriaById(session.categoryId);
+            if (categoria == null) continue;
+
+            // Obtener todos los items de la categoría
+            var allItems = await _inventarioRepository.getInventarioByCategoria(categoria.idCategoria);
+            
+            // Filtrar por subcategoría de jumper si aplica
+            allItems = _filterItemsByJumperCategory(allItems, session.categoryName);
+
+            // Agregar datos de cada producto
+            for (var item in allItems) {
+              // Si el item está en la sesión, usar esa cantidad, si no, usar la original
+              final sessionQuantity = session.quantities.containsKey(item.producto.idProducto)
+                  ? session.quantities[item.producto.idProducto]!
+                  : item.cantidad;
+
+              itemsToExport.add({
+                'tipo': _getCategoryDisplayName(session.categoryName), // Tipo (solo subcategoría si es jumper)
+                'tamano': item.producto.tamano?.toString() ?? '',
+                'cantidad': sessionQuantity,
+                'rack': item.producto.rack ?? '',
+                'contenedor': item.producto.contenedor ?? '',
+              });
+            }
+          } catch (e) {
+            debugPrint('Error al procesar inventario de jumpers ${session.id}: $e');
+            // Continuar con el siguiente inventario
+          }
+        }
+
+        if (itemsToExport.isEmpty) {
+          if (mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('No hay datos de jumpers para exportar'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          return;
+        }
+
+        final filePath = await JumpersExportService.exportJumpersToExcel(itemsToExport);
+
+        if (mounted) {
+          Navigator.pop(context); // Cerrar diálogo de carga
+          if (filePath != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Inventario de jumpers exportado: $filePath'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+            
+            // Salir del modo de selección
+            setState(() {
+              _isSelectionMode = false;
+              _selectedSessionIds.clear();
+            });
+          }
+        }
+        return; // Solo exportar jumpers si hay sesiones de jumpers
+      } catch (e) {
+        if (mounted) {
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error al exportar inventario de jumpers: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    // Si solo hay otras sesiones (no cómputo ni jumpers), usar el método original
+    if (otrasSessions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay inventarios seleccionados para exportar'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     // Generar nombre por defecto
     final now = DateTime.now();
     final dateStr = '${now.day.toString().padLeft(2, '0')}_${now.month.toString().padLeft(2, '0')}_${now.year}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
     final defaultFileName = 'Inventarios_Multiples_$dateStr.xlsx';
-
-    // Seleccionar ubicación y nombre del archivo usando saveFile
-    String? filePath = await FilePicker.platform.saveFile(
-      dialogTitle: 'Guardar inventarios como',
-      fileName: defaultFileName,
-      type: FileType.custom,
-      allowedExtensions: ['xlsx'],
-    );
-    
-    if (filePath == null) {
-      return; // Usuario canceló
-    }
-    
-    // Asegurar que el archivo tenga la extensión .xlsx
-    if (!filePath.endsWith('.xlsx')) {
-      filePath = '$filePath.xlsx';
-    }
 
     try {
       // Mostrar indicador de carga
@@ -1330,7 +1640,7 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
       }
 
       // Procesar cada inventario seleccionado
-      for (var session in selectedSessions) {
+      for (var session in otrasSessions) {
         try {
           // Obtener la categoría
           final categoria = await _inventarioRepository.getCategoriaById(session.categoryId);
@@ -1409,8 +1719,19 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
         return;
       }
 
-      final file = File(filePath);
-      await file.writeAsBytes(fileBytes);
+      // Usar el helper para guardar el archivo
+      String? filePath = await FileSaverHelper.saveFile(
+        fileBytes: fileBytes,
+        defaultFileName: defaultFileName,
+        dialogTitle: 'Guardar inventarios como',
+      );
+      
+      if (filePath == null) {
+        if (mounted) {
+          Navigator.pop(context); // Cerrar diálogo de carga
+        }
+        return; // Usuario canceló
+      }
 
       // Cerrar diálogo de carga
       if (mounted) {
@@ -1420,7 +1741,7 @@ class _CompletedInventoriesScreenState extends State<CompletedInventoriesScreen>
       // Mostrar diálogo de éxito
       if (mounted) {
         final fileName = filePath.split('/').last;
-        _showExportSuccessDialog(filePath, fileName, selectedSessions.length);
+        _showExportSuccessDialog(filePath, fileName, otrasSessions.length);
         
         // Salir del modo de selección
         setState(() {

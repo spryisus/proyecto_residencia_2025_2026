@@ -269,4 +269,5 @@ class ReportsScreen extends StatelessWidget {
     // Aquí iría la lógica real para generar el reporte
     // Por ahora solo mostramos un mensaje
   }
+
 }

@@ -257,20 +257,11 @@ class _CategoryInventoryScreenState extends State<CategoryInventoryScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
-          // Limpiar controladores cuando se cierre el diálogo
-          return WillPopScope(
-            onWillPop: () async {
-              // Limpiar todos los controladores
-              for (var controller in controllers.values) {
-                controller.dispose();
-              }
-              return true;
-            },
-            child: Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Container(
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Container(
             width: MediaQuery.of(context).size.width * 0.9,
             height: MediaQuery.of(context).size.height * 0.8,
             padding: const EdgeInsets.all(20),
@@ -498,7 +489,14 @@ class _CategoryInventoryScreenState extends State<CategoryInventoryScreen> {
                                     label: 'Nueva',
                                     width: 105,
                                     productId: item.producto.idProducto,
-                                    onChanged: (_) => setDialogState(() {}),
+                                    onChanged: (_) {
+                                      // Usar SchedulerBinding para asegurar que el estado se actualice de forma segura
+                                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                                        if (context.mounted) {
+                                          setDialogState(() {});
+                                        }
+                                      });
+                                    },
                                   ),
                                   if (tieneCambios)
                                     _buildQuantityChip(
@@ -535,10 +533,6 @@ class _CategoryInventoryScreenState extends State<CategoryInventoryScreen> {
                   children: [
                     TextButton(
                       onPressed: () {
-                        // Limpiar controladores antes de cerrar
-                        for (var controller in controllers.values) {
-                          controller.dispose();
-                        }
                         Navigator.pop(context);
                       },
                       child: const Text(
@@ -554,10 +548,6 @@ class _CategoryInventoryScreenState extends State<CategoryInventoryScreen> {
                           InventorySessionStatus.pending,
                         );
                         if (!mounted) return;
-                        // Limpiar controladores antes de cerrar
-                        for (var controller in controllers.values) {
-                          controller.dispose();
-                        }
                         Navigator.pop(context);
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -602,10 +592,6 @@ class _CategoryInventoryScreenState extends State<CategoryInventoryScreen> {
                           return;
                         }
                         
-                        // Limpiar controladores antes de cerrar
-                        for (var controller in controllers.values) {
-                          controller.dispose();
-                        }
                         Navigator.pop(context);
                         await _performCompleteInventory(inventarioData);
                       },
@@ -631,11 +617,24 @@ class _CategoryInventoryScreenState extends State<CategoryInventoryScreen> {
               ],
             ),
           ),
-        ),
-      );
+        );
         },
       ),
-    );
+    ).then((_) {
+      // Esperar a que el frame se complete antes de desechar los controladores
+      // Esto asegura que el widget esté completamente desmontado
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future.delayed(const Duration(milliseconds: 100), () {
+          for (var controller in controllers.values) {
+            try {
+              controller.dispose();
+            } catch (e) {
+              // Si ya fue desechado, ignorar el error
+            }
+          }
+        });
+      });
+    });
   }
 
   @override
@@ -1574,6 +1573,22 @@ class _CategoryInventoryScreenState extends State<CategoryInventoryScreen> {
 
     if (result == true) {
       try {
+        // Obtener la nueva cantidad
+        final nuevaCantidadStr = cantidadController.text.trim();
+        final nuevaCantidad = int.tryParse(nuevaCantidadStr);
+        
+        if (nuevaCantidad == null || nuevaCantidad < 0) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('La cantidad debe ser un número entero mayor o igual a 0'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+
         // Actualizar producto
         final productoActualizado = item.producto.copyWith(
           nombre: nombreController.text.trim(),
@@ -1594,6 +1609,19 @@ class _CategoryInventoryScreenState extends State<CategoryInventoryScreen> {
 
         await _inventarioRepository.updateProducto(productoActualizado);
 
+        // Actualizar la cantidad en t_inventarios si cambió
+        final cantidadActual = item.cantidad;
+        final diferencia = nuevaCantidad - cantidadActual;
+        
+        if (diferencia != 0) {
+          await _inventarioRepository.ajustarInventario(
+            item.producto.idProducto,
+            item.ubicacion.idUbicacion,
+            diferencia,
+            'Edición manual de cantidad - ${widget.categoriaNombre}',
+          );
+        }
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -1601,7 +1629,8 @@ class _CategoryInventoryScreenState extends State<CategoryInventoryScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          _loadInventory();
+          // Recargar el inventario para reflejar los cambios
+          await _loadInventory();
         }
       } catch (e) {
         if (mounted) {

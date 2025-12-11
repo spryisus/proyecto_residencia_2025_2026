@@ -197,9 +197,15 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/health',
       track: '/api/track/:trackingNumber',
+      warmup: '/warmup',
+      keepalive: '/keepalive',
       example: '/api/track/6376423056'
     },
-    documentation: 'Este servicio permite consultar el estado de envíos DHL usando web scraping.'
+    documentation: 'Este servicio permite consultar el estado de envíos DHL usando web scraping.',
+    optimization: {
+      warmup: 'Llama a /warmup antes de hacer una consulta para precargar la página y acelerar la primera consulta',
+      keepalive: 'Llama a /keepalive periódicamente (cada 10-12 minutos) para mantener el servicio activo en Render'
+    }
   });
 });
 
@@ -324,15 +330,16 @@ async function preloadDHLPage() {
       await page.waitForTimeout(randomDelay(2000, 4000));
       
       // Precargar página de tracking con número de ejemplo
+      // Usar 'domcontentloaded' en lugar de 'networkidle2' para ser más rápido
       const preloadUrl = `https://www.dhl.com/mx-es/home/tracking/tracking.html?submit=1&tracking-id=${PRELOAD_TRACKING_NUMBER}`;
       console.log(`📡 Precargando página de tracking: ${PRELOAD_TRACKING_NUMBER}...`);
       await page.goto(preloadUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 180000,
+        waitUntil: 'domcontentloaded', // Más rápido que networkidle2
+        timeout: 120000, // Reducido a 2 minutos
       });
       
-      // Esperar un poco para que cargue
-      await page.waitForTimeout(randomDelay(5000, 10000));
+      // Esperar menos tiempo para precarga (solo lo esencial)
+      await page.waitForTimeout(randomDelay(3000, 5000)); // Reducido de 5-10s a 3-5s
       
       // Guardar cookies
       try {
@@ -659,10 +666,13 @@ async function scrapeDHLTracking(trackingNumber, attempt = 1) {
     // Si estamos usando página precargada, solo navegar a la nueva URL (más rápido)
     if (usePreloaded) {
       console.log('⚡ Usando página precargada - solo actualizando número de tracking...');
+      // Usar domcontentloaded primero para ser más rápido, luego esperar contenido dinámico
       await page.goto(trackingUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 180000,
+        waitUntil: 'domcontentloaded', // Más rápido inicialmente
+        timeout: 120000,
       });
+      // Esperar un poco menos ya que la página ya está "caliente"
+      await page.waitForTimeout(randomDelay(2000, 4000)); // Reducido de 10-15s
     } else {
       // Ir a la página con networkidle2 para asegurar que TODO cargue (más lento pero más seguro)
       console.log('⏳ Cargando página de DHL...');
@@ -1612,6 +1622,101 @@ app.get('/api/track/:trackingNumber', async (req, res) => {
  */
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'DHL Tracking Proxy' });
+});
+
+/**
+ * Endpoint de warmup - Precarga la página de DHL para consultas más rápidas
+ * GET /warmup
+ * 
+ * Este endpoint se puede llamar antes de hacer una consulta real para
+ * asegurar que la página ya esté precargada y lista.
+ */
+app.get('/warmup', async (req, res) => {
+  try {
+    console.log('🔥 Warmup solicitado - precargando página DHL...');
+    const startTime = Date.now();
+    
+    // Intentar precargar la página
+    const preloaded = await preloadDHLPage();
+    
+    const elapsed = Date.now() - startTime;
+    
+    if (preloaded && preloaded.browser && preloaded.page) {
+      res.json({
+        success: true,
+        message: 'Página precargada exitosamente',
+        elapsed: `${elapsed}ms`,
+        ready: true,
+      });
+      console.log(`✅ Warmup completado en ${elapsed}ms`);
+    } else {
+      res.json({
+        success: false,
+        message: 'No se pudo precargar la página',
+        elapsed: `${elapsed}ms`,
+        ready: false,
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error en warmup:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      ready: false,
+    });
+  }
+});
+
+/**
+ * Endpoint de keep-alive - Mantiene el servicio activo en Render
+ * GET /keepalive
+ * 
+ * Render.com "duerme" los servicios gratuitos después de 15 minutos de inactividad.
+ * Este endpoint se puede llamar periódicamente para mantener el servicio activo.
+ * También verifica y recarga la página precargada si es necesario.
+ */
+app.get('/keepalive', async (req, res) => {
+  try {
+    const isPreloadedReady = preloadedBrowser && preloadedPage;
+    let preloadStatus = 'unknown';
+    
+    // Verificar si la página precargada sigue activa
+    if (isPreloadedReady) {
+      try {
+        await preloadedPage.evaluate(() => document.title);
+        preloadStatus = 'ready';
+      } catch (e) {
+        preloadStatus = 'expired';
+        // Limpiar referencias
+        preloadedBrowser = null;
+        preloadedPage = null;
+        isPreloading = false;
+        preloadPromise = null;
+      }
+    } else {
+      preloadStatus = 'not_loaded';
+    }
+    
+    // Si la página precargada no está lista, intentar recargarla en background
+    if (preloadStatus !== 'ready' && !isPreloading) {
+      console.log('🔄 Recargando página precargada en background...');
+      preloadDHLPage().catch(err => {
+        console.log('⚠️ Error al recargar en background:', err.message);
+      });
+    }
+    
+    res.json({
+      status: 'alive',
+      timestamp: new Date().toISOString(),
+      preloadStatus: preloadStatus,
+      message: 'Servicio activo',
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: error.message,
+    });
+  }
 });
 
 // Iniciar verificación de Chrome en background al iniciar el servidor
